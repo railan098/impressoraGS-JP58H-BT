@@ -28,22 +28,86 @@ Autor: gerado para uso livre. Sem garantias — mas testado em hardware real.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import platform
 import sys
 from typing import Iterator, List, Optional, Tuple
 
 # --------------------------------------------------------------------------- #
-# Importação do PyUSB com mensagem de erro amigável
+# Importação do PyUSB, com recuperação automática pelo ambiente virtual
 # --------------------------------------------------------------------------- #
+def _python_do_venv() -> Optional[str]:
+    """Procura um interpretador de ambiente virtual ao lado deste script.
+
+    O erro mais comum de uso é rodar ``python imprime_termica.py`` com o Python
+    global, que não tem o pyusb, enquanto o ``.venv`` criado pelo instalador —
+    esse sim com tudo instalado — fica ignorado bem ao lado.
+
+    Returns:
+        O caminho do python do venv, ou ``None`` se não houver nenhum.
+    """
+    base = os.path.dirname(os.path.abspath(__file__))
+    candidatos = [
+        os.path.join(base, ".venv", "Scripts", "python.exe"),  # Windows
+        os.path.join(base, ".venv", "bin", "python"),          # Linux / macOS
+        os.path.join(base, "venv", "Scripts", "python.exe"),
+        os.path.join(base, "venv", "bin", "python"),
+    ]
+    for caminho in candidatos:
+        if os.path.isfile(caminho) and os.path.abspath(caminho) != os.path.abspath(sys.executable):
+            return caminho
+    return None
+
+
 try:
     import usb.core
     import usb.util
     import usb.backend.libusb1
 except ImportError:  # pragma: no cover
+    # --- Tentativa de recuperação: reexecutar com o Python do ambiente virtual.
+    #     A variável sentinela evita laço infinito caso o venv também não tenha
+    #     o pyusb. Não se aplica ao executável do PyInstaller, que é autocontido.
+    _venv = None if getattr(sys, "frozen", False) else _python_do_venv()
+    if _venv and os.environ.get("_IMPRESSORA_RELANCADA") != "1":
+        os.environ["_IMPRESSORA_RELANCADA"] = "1"
+        sys.stderr.write(
+            f"[i] pyusb ausente neste Python. Reexecutando com o ambiente\n"
+            f"    virtual do projeto: {_venv}\n"
+        )
+        try:
+            os.execv(_venv, [_venv, os.path.abspath(__file__)] + sys.argv[1:])
+        except OSError:
+            pass  # falhou o relançamento — cai na mensagem de erro abaixo
+
+    _venv_dica = ""
+    if _venv:
+        _venv_dica = (
+            "\n       O projeto TEM um ambiente virtual, mas não consegui usá-lo:\n"
+            f"         {_venv}\n"
+            "       Chame o script por ele:\n"
+            + (f'         "{_venv}" imprime_termica.py\n'
+               if os.name == "nt" else
+               f"         {_venv} imprime_termica.py\n")
+        )
+    elif os.name == "nt":
+        _venv_dica = (
+            "\n       Voce provavelmente rodou 'python imprime_termica.py' direto.\n"
+            "       Use o instalador do projeto, que cria o ambiente virtual:\n"
+            "         1. De duplo clique em  instalar.bat\n"
+            "         2. Depois use          imprimir.bat\n"
+        )
+    else:
+        _venv_dica = (
+            "\n       Use o instalador do projeto:\n"
+            "         ./instalar.sh     e depois     ./imprimir.sh\n"
+        )
+
     sys.stderr.write(
-        "\n[ERRO] A biblioteca 'pyusb' não está instalada.\n"
-        "       Instale com:  pip install pyusb\n\n"
+        "\n[ERRO] A biblioteca 'pyusb' nao esta instalada neste interpretador.\n"
+        f"       Python em uso: {sys.executable}\n"
+        f"{_venv_dica}"
+        "\n       Ou instale manualmente:  pip install pyusb\n\n"
     )
     raise SystemExit(2)
 
@@ -136,6 +200,72 @@ VIDPID_CONHECIDOS: List[Tuple[int, int, str]] = [
     (0x6868, 0x0500, "Zjiang / ZJ-5802"),
     (0x0FE6, 0x811E, "ICS Advent — POS-5890"),
 ]
+
+
+# --------------------------------------------------------------------------- #
+# Configuração persistente — "lembrar" a impressora entre execuções
+# --------------------------------------------------------------------------- #
+def caminho_config() -> str:
+    r"""Devolve o caminho do arquivo de configuração da impressora.
+
+    Fica na pasta de configuração do usuário (e não junto do script) para que
+    o projeto possa viver numa pasta somente-leitura e para não sujar o
+    repositório Git.
+
+    - Windows: ``%LOCALAPPDATA%\impressora-termica\impressora.json``
+    - Linux:   ``~/.config/impressora-termica/impressora.json``
+    """
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    else:
+        base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(
+            os.path.expanduser("~"), ".config")
+    return os.path.join(base, "impressora-termica", "impressora.json")
+
+
+def salvar_config(dev, intf, endpoint_out) -> None:
+    """Grava os dados da impressora detectada para as próximas execuções.
+
+    Falhar aqui nunca pode atrapalhar a impressão — é só uma conveniência —,
+    por isso qualquer erro de escrita é engolido de propósito.
+    """
+    dados = {
+        "idVendor": dev.idVendor,
+        "idProduct": dev.idProduct,
+        "produto": _texto_seguro(dev, "product"),
+        "fabricante": _texto_seguro(dev, "manufacturer"),
+        "interface": intf.bInterfaceNumber if intf is not None else 0,
+        "endpoint_out": getattr(endpoint_out, "bEndpointAddress", None),
+        "sistema": f"{platform.system()} {platform.machine()}",
+    }
+    caminho = caminho_config()
+    try:
+        os.makedirs(os.path.dirname(caminho), exist_ok=True)
+        with open(caminho, "w", encoding="utf-8") as fp:
+            json.dump(dados, fp, indent=2, ensure_ascii=False)
+    except OSError:
+        pass  # sem permissão de escrita: seguimos sem lembrar, sem reclamar
+
+
+def carregar_config() -> Optional[dict]:
+    """Lê a impressora memorizada, ou ``None`` se não houver/estiver corrompida."""
+    try:
+        with open(caminho_config(), "r", encoding="utf-8") as fp:
+            dados = json.load(fp)
+        if isinstance(dados, dict) and "idVendor" in dados and "idProduct" in dados:
+            return dados
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def esquecer_config() -> bool:
+    """Apaga a impressora memorizada. Retorna True se havia algo para apagar."""
+    try:
+        os.remove(caminho_config())
+        return True
+    except OSError:
+        return False
 
 
 # --------------------------------------------------------------------------- #
@@ -317,6 +447,19 @@ def encontrar_impressora(vid: Optional[int] = None,
         intf = next(interfaces_impressora(dev), None)
         print(f"[OK] Impressora forçada: 0x{vid:04X}:0x{pid:04X}")
         return dev, intf
+
+    # --- 1.5. Impressora memorizada de uma execução anterior ------------------
+    memorizada = carregar_config()
+    if memorizada:
+        dev = usb.core.find(idVendor=memorizada["idVendor"],
+                            idProduct=memorizada["idProduct"], backend=backend)
+        if dev is not None:
+            print(f"[OK] Impressora memorizada: "
+                  f"0x{dev.idVendor:04X}:0x{dev.idProduct:04X} "
+                  f"— {memorizada.get('produto', '?')}")
+            return dev, next(interfaces_impressora(dev), None)
+        # Memorizada mas ausente: pode ter trocado de porta ou de equipamento.
+        # Não é erro — apenas seguimos para a varredura normal.
 
     # --- 2. Varredura por classe de INTERFACE = 7 (método principal) ----------
     for dev in usb.core.find(find_all=True, backend=backend):
@@ -530,6 +673,8 @@ def imprimir_pyusb(dados: bytes, vid=None, pid=None, backend=None,
             bloco = dados[inicio:inicio + tamanho_bloco]
             enviados += endpoint_out.write(bloco, timeout=timeout)
         print(f"[OK] {enviados} bytes enviados à impressora.")
+        # Deu certo: memoriza para as próximas execuções irem direto ao ponto.
+        salvar_config(dev, intf, endpoint_out)
     finally:
         # Libera os recursos do libusb sempre — senão a próxima execução
         # falha com "Resource busy".
@@ -654,7 +799,14 @@ def explicar_usberror(erro: usb.core.USBError) -> str:
         return ("A impressora foi DESCONECTADA durante a operação.\n"
                 "  Reconecte o cabo USB e tente de novo.")
 
-    if "timeout" in str(erro).lower():
+    # O PyUSB reporta timeout como "Operation timed out" (errno 110 no Linux) e
+    # levanta USBTimeoutError. Testar so por "timeout" NAO pega "timed out".
+    texto_erro = str(erro).lower()
+    classe_timeout = getattr(usb.core, "USBTimeoutError", ())
+    if (isinstance(erro, classe_timeout)
+            or errno == 110
+            or "timeout" in texto_erro
+            or "timed out" in texto_erro):
         return (
             "TIMEOUT na escrita.\n\n"
             "  Causas comuns:\n"
@@ -701,11 +853,41 @@ def main() -> int:
                         help="caminho para libusb-1.0.dll / .so (ou env LIBUSB_PATH)")
     parser.add_argument("--abrir-gaveta", action="store_true",
                         help="envia o pulso de abertura da gaveta (RJ11)")
+    parser.add_argument("--esquecer", action="store_true",
+                        help="apaga a impressora memorizada e sai")
+    parser.add_argument("--config", action="store_true",
+                        help="mostra a impressora memorizada e sai")
     args = parser.parse_args()
 
     print(f"\n=== Impressora Térmica 58mm — ESC/POS via USB ===")
     print(f"    {platform.system()} {platform.release()} / {platform.machine()} "
           f"/ Python {platform.python_version()}\n")
+
+    # --- Impressora memorizada -----------------------------------------------
+    if args.esquecer:
+        if esquecer_config():
+            print(f"[OK] Impressora memorizada apagada.")
+            print(f"     ({caminho_config()})")
+        else:
+            print("[i] Não havia nenhuma impressora memorizada.")
+        return 0
+
+    if args.config:
+        memorizada = carregar_config()
+        print(f"Arquivo: {caminho_config()}")
+        if memorizada:
+            print("Impressora memorizada:")
+            for chave, valor in memorizada.items():
+                if chave in ("idVendor", "idProduct") and isinstance(valor, int):
+                    print(f"  {chave:14s}: 0x{valor:04X}")
+                elif chave == "endpoint_out" and isinstance(valor, int):
+                    print(f"  {chave:14s}: 0x{valor:02X}")
+                else:
+                    print(f"  {chave:14s}: {valor}")
+        else:
+            print("Nenhuma impressora memorizada ainda.")
+            print("Ela é gravada automaticamente na primeira impressão.")
+        return 0
 
     # --- Backend libusb ------------------------------------------------------
     try:

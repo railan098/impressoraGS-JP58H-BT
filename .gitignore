@@ -34,3 +34,6 @@ desktop.ini
 .idea/
 *.swp
 *~
+
+# Config local da impressora (gerado em runtime)
+impressora.json

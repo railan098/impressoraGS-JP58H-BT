@@ -70,6 +70,8 @@ serrilha manual não tem), o comando é simplesmente ignorado pelo firmware — 
 | **`instalar.bat`** | **instalador automático do Windows — duplo clique** |
 | `imprimir.bat` | menu de uso no Windows |
 | `gerar_exe.bat` | gera o `.exe` standalone |
+| **`testar.bat`** | **roda o diagnóstico completo (37 verificações)** |
+| `autoteste.py` | a bateria de testes em si |
 | `instalar.sh` | instalador automático do Linux |
 | `imprimir.sh` | atalho de uso no Linux |
 | `requirements.txt` | dependências |
@@ -609,3 +611,80 @@ O `.gitignore` exclui de propósito:
 ⚠️ **Importante sobre a `libusb-1.0.dll`:** nunca versione essa DLL. A do x64 não
 roda no ARM64 e vice-versa — se ela entrar no repositório, quebra na outra máquina.
 Deixe o `instalar.bat` baixar a correta para cada uma.
+
+---
+
+## 8. 🧪 Diagnóstico (`testar.bat` / `autoteste.py`)
+
+Quando algo não funciona, **rode isto primeiro** — ele diz exatamente onde está o
+problema, sem adivinhação:
+
+```powershell
+testar.bat                  # Windows (duplo clique também funciona)
+```
+```bash
+./.venv/bin/python autoteste.py     # Linux
+```
+
+São 37 verificações em 8 blocos: ambiente, dependências, backend libusb, comandos
+ESC/POS byte a byte, montagem do cupom, enumeração USB, tratamento de erros e
+impressão física.
+
+Funciona **com ou sem a impressora conectada**. Sem ela, valida toda a lógica e
+avisa que a parte física ficou pendente. Para incluir a impressão de verdade:
+
+```powershell
+testar.bat --imprimir
+```
+
+Resultado esperado quando está tudo certo:
+
+```
+  Total de verificacoes : 37
+  Passou                : 35
+  Falhou                : 0
+  Pulou                 : 2
+```
+
+> Se pedir ajuda a alguém, **cole a saída completa do `testar.bat`**. Ela contém a
+> arquitetura do Python, a versão das bibliotecas, o estado do backend e a lista de
+> dispositivos USB — que é tudo o que se precisa para diagnosticar.
+
+### Bugs que esta bateria já encontrou
+
+Não é teste decorativo — ele pegou defeitos reais durante o desenvolvimento:
+
+| Bug | Consequência |
+|---|---|
+| `"timeout" in str(erro)` não casava com a mensagem real do PyUSB, `"Operation timed out"` | O erro mais comum (sem papel, tampa aberta, impressora desligada) caía em "erro não classificado" em vez da mensagem útil. Corrigido testando também `"timed out"`, `errno 110` e `USBTimeoutError`. |
+| `echo A) ...` dentro de bloco `if ( )` no `.bat` | O `)` fechava o bloco antes da hora e quebrava o instalador justamente na mensagem de "Python não encontrado". |
+| Linhas com LF puro nos `.bat` | O `cmd.exe` não interpreta. Resolvido com CRLF + `.gitattributes`. |
+
+---
+
+## 9. 💾 A impressora fica memorizada
+
+Na **primeira impressão bem-sucedida**, o programa grava os dados da impressora e
+passa a ir direto nela nas próximas vezes, sem varrer o barramento USB inteiro.
+
+```
+[OK] Impressora memorizada: 0x0416:0x5011 — POS-58 Printer
+```
+
+Onde fica o arquivo:
+
+| Sistema | Caminho |
+|---|---|
+| Windows | `%LOCALAPPDATA%\impressora-termica\impressora.json` |
+| Linux | `~/.config/impressora-termica/impressora.json` |
+
+Fica **fora da pasta do projeto** de propósito: assim o `git pull` nunca sobrescreve
+a sua configuração, e o projeto pode viver numa pasta somente-leitura.
+
+```bash
+python imprime_termica.py --config      # mostra o que está memorizado
+python imprime_termica.py --esquecer    # apaga e volta a autodetectar
+```
+
+Se a impressora memorizada não estiver presente (mudou de porta, trocou de
+equipamento), **não dá erro** — o programa volta sozinho para a autodetecção normal.
