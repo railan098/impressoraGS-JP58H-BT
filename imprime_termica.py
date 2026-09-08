@@ -192,8 +192,8 @@ def _erro_sem_backend() -> str:
             "       1) pip install libusb-package\n"
             "       2) Baixe libusb-1.0.x.7z em https://github.com/libusb/libusb/releases\n"
             "          e copie a DLL da pasta correspondente ao SEU Python:\n"
-            "             Python ARM64 -> VS2022\\ARM64\\dll\\libusb-1.0.dll\n"
-            "             Python x64   -> VS2022\\MS64\\dll\\libusb-1.0.dll\n"
+            "             Python ARM64 -> VS2025\\ARM64\\dll\\libusb-1.0.dll\n"
+            "             Python x64   -> VS2025\\MS64\\dll\\libusb-1.0.dll\n"
             "          para a mesma pasta deste script (ou aponte com --libusb).\n"
         )
     return (

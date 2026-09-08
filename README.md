@@ -67,8 +67,42 @@ serrilha manual não tem), o comando é simplesmente ignorado pelo firmware — 
 | Arquivo | Função |
 |---|---|
 | `imprime_termica.py` | o programa |
+| **`instalar.bat`** | **instalador automático do Windows — duplo clique** |
+| `imprimir.bat` | menu de uso no Windows |
+| `gerar_exe.bat` | gera o `.exe` standalone |
+| `instalar.sh` | instalador automático do Linux |
+| `imprimir.sh` | atalho de uso no Linux |
 | `requirements.txt` | dependências |
 | `99-impressora-termica.rules` | regra udev (Linux) |
+
+---
+
+## 1.1 🚀 Instalação rápida (o caminho curto)
+
+### Windows
+
+```
+1. Baixe/clone este projeto
+2. DUPLO CLIQUE em  instalar.bat
+3. Siga as instruções na tela
+4. Rode o Zadig (o instalador te avisa se for preciso)
+5. DUPLO CLIQUE em  imprimir.bat
+```
+
+O `instalar.bat` faz tudo sozinho: confere o Python e a arquitetura, cria o
+ambiente virtual, instala as bibliotecas, resolve a libusb (inclusive baixando a
+DLL ARM64 do GitHub se você estiver no Python ARM64), testa o backend e já procura
+a impressora.
+
+### Linux
+
+```bash
+chmod +x instalar.sh imprimir.sh
+./instalar.sh
+```
+
+As seções abaixo explicam o que os instaladores fazem por baixo, e servem para
+quando algo dá errado.
 
 ---
 
@@ -102,9 +136,16 @@ impressora o custo da emulação é irrelevante.
    python --version
    ```
 
+> **Python 3.14 funciona.** Verifiquei a disponibilidade de wheels no PyPI:
+> `pyusb` e `python-escpos` são Python puro (rodam em qualquer versão/arquitetura),
+> e o `Pillow` (dependência do escpos) já publica wheels `cp314` para
+> `win_amd64` **e** `win_arm64`. O único pacote sem versão ARM64 é o
+> `libusb-package` — que é exatamente por isso que a rota x64 é a recomendada.
+> Se você insistir no ARM64, o `instalar.bat` baixa a DLL certa automaticamente.
+
 **Rota B (só se você fizer questão do ARM64 nativo):** instale o Python ARM64, baixe
 `libusb-1.0.XX.7z` em <https://github.com/libusb/libusb/releases>, extraia
-`VS2022\ARM64\dll\libusb-1.0.dll` e coloque na mesma pasta do script (ou aponte com
+`VS2025\ARM64\dll\libusb-1.0.dll` e coloque na mesma pasta do script (ou aponte com
 `--libusb C:\caminho\libusb-1.0.dll`).
 
 ### 2.2 — Instalar as dependências
@@ -446,3 +487,108 @@ imprimir_pyusb(dados)
 # Ou o atalho:
 imprimir_pyusb(montar_cupom("Comanda 42"))
 ```
+
+---
+
+## 7. 🐙 Fluxo de trabalho com o GitHub
+
+Repositório: <https://github.com/railan098/impressoraGS-JP58H-BT>
+
+### 7.1 — Enviar as alterações (do Linux, onde você desenvolve)
+
+```bash
+git add -A
+git commit -m "Descreva o que mudou"
+git push origin main
+```
+
+### 7.2 — Baixar no Windows ARM (a máquina da impressora)
+
+Abra o **Git Bash** ou o **PowerShell** na pasta onde quer o projeto:
+
+```bash
+git clone https://github.com/railan098/impressoraGS-JP58H-BT.git
+cd impressoraGS-JP58H-BT
+```
+
+Depois é só dar **duplo clique em `instalar.bat`**.
+
+### 7.3 — Atualizar o Windows depois de mudar algo no Linux
+
+No Windows, dentro da pasta do projeto:
+
+```bash
+git pull
+```
+
+Pronto — o `imprime_termica.py` atualizado já está lá. Não precisa reinstalar nada,
+o `.venv` continua valendo. Só rode `imprimir.bat` de novo.
+
+> Esse é o ciclo que você queria: **edita no Linux → `git push` → `git pull` no
+> Windows → testa na impressora.** Sem pendrive, sem anexo de e-mail.
+
+### 7.4 — Se você editar direto no Windows
+
+```bash
+git add -A
+git commit -m "Ajuste feito no Windows"
+git push
+```
+
+E no Linux, `git pull` para receber de volta.
+
+### 7.5 — Autenticação (o GitHub não aceita mais senha)
+
+Se o `git push` pedir usuário e senha e recusar sua senha normal, é porque o GitHub
+exige **token**, não senha:
+
+1. <https://github.com/settings/tokens> → **Generate new token (classic)**
+2. Marque o escopo **`repo`**
+3. Copie o token (ele só aparece uma vez)
+4. No `git push`, use o **token no lugar da senha**
+
+Para não digitar toda vez:
+
+```bash
+# Linux
+git config --global credential.helper store
+
+# Windows (já vem com o Git for Windows)
+git config --global credential.helper manager
+```
+
+### 7.6 — ⚠️ Sobre o binário de 21 MB no histórico
+
+O primeiro commit incluiu `dist/imprime_termica` (o executável Linux, 21 MB). Já
+adicionei `dist/` ao `.gitignore`, então **novos commits não levam mais binários** —
+mas o arquivo continua no histórico do repositório, deixando o `git clone` pesado.
+
+Como o repositório é novo e só você o usa, dá para limpar reescrevendo o histórico:
+
+```bash
+git checkout --orphan limpo     # cria um branch sem histórico
+git add -A
+git commit -m "Impressora térmica 58mm ESC/POS via USB"
+git branch -D main
+git branch -m main
+git push -f origin main         # sobrescreve o histórico remoto
+```
+
+> **Só faça isso se ninguém mais tiver clonado o repositório** — o `push -f`
+> reescreve o histórico para todo mundo. Se preferir não mexer, não tem problema:
+> os 21 MB só tornam o clone mais lento, nada quebra.
+
+### 7.7 — O que **não** vai para o GitHub (por design)
+
+O `.gitignore` exclui de propósito:
+
+| Item | Por quê |
+|---|---|
+| `.venv/` | ambiente virtual — cada máquina cria o seu |
+| `dist/`, `build/`, `*.spec` | binários gerados; recrie com `gerar_exe.bat` |
+| `libusb-1.0.dll` | é baixada pelo instalador, e é específica da arquitetura |
+| `POS58Setup.exe`, `POS-58` | drivers do fabricante (3 MB, e não funcionam em ARM) |
+
+⚠️ **Importante sobre a `libusb-1.0.dll`:** nunca versione essa DLL. A do x64 não
+roda no ARM64 e vice-versa — se ela entrar no repositório, quebra na outra máquina.
+Deixe o `instalar.bat` baixar a correta para cada uma.
