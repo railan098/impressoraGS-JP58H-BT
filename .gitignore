@@ -37,3 +37,6 @@ desktop.ini
 
 # Config local da impressora (gerado em runtime)
 impressora.json
+
+# Config local da ponte HTTP (porta e origens permitidas)
+ponte_config.json

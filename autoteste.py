@@ -279,7 +279,7 @@ def main() -> int:
     class ErroFalso(usb.core.USBError):
         pass
 
-    for errno, palavra in ((13, "PERMISS"), (16, "OCUPADO"), (19, "DESCONECT")):
+    for errno, palavra in ((13, "NEGAD"), (16, "OCUPADO"), (19, "DESCONECT")):
         try:
             e = usb.core.USBError("simulado", errno=errno)
             msg = explicar_usberror(e)
@@ -312,6 +312,21 @@ def main() -> int:
             imprimir_pyusb(dados, backend=backend)
             checa("Impressao fisica concluida", True,
                   f"{len(dados)} bytes enviados")
+        except NotImplementedError:
+            # libusb enxerga mas nao abre: o usbprint.sys ainda esta anexado.
+            # Em vez de exigir o Zadig, tenta o transporte nativo do Windows -
+            # o mesmo fallback que o imprime_termica.py usa sozinho.
+            if platform.system() != "Windows":
+                raise
+            try:
+                from imprime_termica import _imprimir_via_usbprint
+                _imprimir_via_usbprint(dados)
+                checa("Impressao fisica concluida (via usbprint)", True,
+                      f"{len(dados)} bytes - sem Zadig")
+            except Exception as e2:
+                from imprime_termica import _erro_driver_incompativel
+                checa("Impressao fisica concluida", False, repr(e2))
+                print(_erro_driver_incompativel())
         except Exception as e:
             checa("Impressao fisica concluida", False, repr(e))
             traceback.print_exc()

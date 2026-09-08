@@ -688,3 +688,142 @@ python imprime_termica.py --esquecer    # apaga e volta a autodetectar
 
 Se a impressora memorizada não estiver presente (mudou de porta, trocou de
 equipamento), **não dá erro** — o programa volta sozinho para a autodetecção normal.
+
+---
+
+## 10. 🖨️ Sem Zadig: o transporte `usbprint` (Windows / Snapdragon)
+
+O caminho PyUSB + libusb exige trocar o driver da impressora para WinUSB
+com o Zadig. Em **Windows sobre ARM (Snapdragon) isso é o passo mais
+frágil** de todo o projeto: o Zadig é um binário x86 rodando sob emulação,
+pede administrador, exige aceitar um driver não assinado, e das três opções
+que ele oferece **só o WinUSB tem binário ARM64** (libusb-win32 e libusbK
+não têm).
+
+Só que existe um atalho. O `usbprint.sys` — o driver que o Windows já anexa
+sozinho, e que é justamente o que **bloqueia** o libusb — expõe um *device
+interface* (`GUID_DEVINTERFACE_USBPRINT`) que aceita bytes ESC/POS crus:
+
+```
+\\?\usb#vid_0416&pid_5011#b120300001#{28d78fad-5a12-11d1-ae5b-0000f803a8c2}
+```
+
+Basta abrir esse caminho com `CreateFileW` e escrever com `WriteFile`. O
+driver que atrapalhava vira o transporte. É API nativa do Windows
+(setupapi + kernel32), então roda em ARM64 sem emulação de driver.
+
+| | Zadig / WinUSB | `usbprint` (este projeto) |
+|---|---|---|
+| Trocar driver | sim | **não** |
+| Administrador | sim | **não** |
+| Funciona em ARM64 | só o WinUSB | **sim, nativo** |
+| Impressora visível no Windows | some | **continua** |
+| Ler status da impressora | sim | não (só escrita) |
+
+Implementado em **`usbprint_win.py`**. O `imprime_termica.py` usa esse
+caminho **automaticamente** quando o libusb não consegue abrir o
+dispositivo — você não precisa fazer nada. Para forçar:
+
+```bash
+python imprime_termica.py --usbprint --texto "Olá"
+```
+
+> Como ESC/POS é um protocolo de mão única, não ler status não faz falta
+> para imprimir. Se um dia precisar de status, aí sim o WinUSB é necessário.
+
+---
+
+## 11. 🌐 Imprimir a partir do navegador (Ponte de Impressão)
+
+### Por que uma ponte
+
+Um sistema web **não consegue** falar direto com a impressora USB:
+
+- a API **WebUSB bloqueia** dispositivos de classe 7 (impressora);
+- e mesmo que não bloqueasse, o `usbprint.sys` já reivindicou o aparelho;
+- `window.print()` abre a caixa de diálogo do Windows e manda a página como
+  imagem — não é ESC/POS, e a térmica não entende.
+
+A saída padrão é uma **ponte local**: um app roda na máquina da impressora e
+expõe um servidor HTTP em `127.0.0.1`. O sistema web imprime com um `fetch`.
+
+```
+  navegador  --HTTP-->  ponte (127.0.0.1:9100)  --usbprint-->  impressora
+```
+
+### Como usar
+
+Duplo clique em **`ponte.bat`**. Abre uma janela com o estado da impressora,
+botão de teste e o log das impressões. Para subir junto com o Windows:
+
+```bash
+instalar_inicializacao.bat
+```
+
+(cria um atalho na pasta Inicializar do seu usuário; não precisa de
+administrador. Para remover: `instalar_inicializacao.bat /remover`.)
+
+Abra **`exemplo_web.html`** para testar e copiar o código de integração.
+
+### A API
+
+| Rota | Método | Corpo | Resposta |
+|---|---|---|---|
+| `/status` | GET | — | estado da ponte e da impressora |
+| `/imprimir` | POST | `{texto, codepage, cortar, abrir_gaveta}` | `{ok, bytes}` |
+| `/raw` | POST | `{base64}` — ESC/POS cru | `{ok, bytes}` |
+
+```js
+async function imprimir(texto) {
+  const r = await fetch("http://127.0.0.1:9100/imprimir", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ texto: texto, cortar: true })
+  });
+  const dados = await r.json();
+  if (!dados.ok) throw new Error(dados.erro);
+  return dados.bytes;
+}
+```
+
+### Segurança — leia isto
+
+O servidor escuta **só em `127.0.0.1`**, então nenhuma outra máquina da rede
+alcança a impressora. Mas quem pode chamá-lo é controlado pelo
+`ponte_config.json`:
+
+```json
+{
+  "porta": 9100,
+  "origens_permitidas": ["*"],
+  "codepage_padrao": "cp850",
+  "cortar_padrao": true
+}
+```
+
+> ⚠️ Com `"*"`, **qualquer site** aberto no seu navegador consegue mandar
+> imprimir. Assim que souber o endereço do seu sistema, troque por:
+>
+> ```json
+> "origens_permitidas": ["https://meusistema.com.br"]
+> ```
+
+### HTTPS e o navegador
+
+Se o seu sistema roda em HTTPS, a chamada para `http://127.0.0.1` **não** é
+barrada como conteúdo misto: os navegadores tratam `localhost` como origem
+confiável. O Chrome ainda exige o cabeçalho
+`Access-Control-Allow-Private-Network` (Private Network Access) — a ponte já
+envia esse cabeçalho, junto com o CORS comum.
+
+### Problemas comuns
+
+| Sintoma | Causa provável |
+|---|---|
+| "Ponte não respondeu" | o `ponte.bat` não está rodando na máquina |
+| HTTP 403 | origem do site fora de `origens_permitidas` |
+| HTTP 503 | impressora desconectada — confira o cabo |
+| HTTP 502 | sem papel, tampa aberta ou impressora desligada |
+| Porta 9100 ocupada | a ponte já está aberta, ou troque `porta` no config |
+
+---
