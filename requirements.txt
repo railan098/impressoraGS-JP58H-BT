@@ -1,0 +1,9 @@
+# Obrigatório: acesso USB de baixo nível
+pyusb>=1.2.1
+
+# Opcional: API de alto nível ESC/POS (--usar-escpos)
+python-escpos>=3.0
+
+# Opcional (Windows): traz a libusb-1.0.dll embutida no pacote,
+# evitando ter que baixar e posicionar a DLL manualmente.
+# libusb-package>=1.0.26

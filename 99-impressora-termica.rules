@@ -1,0 +1,23 @@
+# /etc/udev/rules.d/99-impressora-termica.rules
+#
+# Permite acesso USB direto (libusb/pyusb) à impressora térmica 58mm sem sudo.
+#
+# Instalação:
+#   sudo cp 99-impressora-termica.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+#   sudo usermod -aG lp $USER      # depois faça logout/login
+#
+# Descubra o seu VID/PID com:  lsusb   ou   python3 imprime_termica.py --listar
+
+# --- POS-58 / SMX-JP58H (Winbond/Nuvoton YICHIP3121) — o caso mais comum
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0416", ATTRS{idProduct}=="5011", MODE="0666", GROUP="lp", TAG+="uaccess"
+
+# --- Outros clones 58mm frequentes
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5743", MODE="0666", GROUP="lp", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="6868", ATTRS{idProduct}=="0500", MODE="0666", GROUP="lp", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0fe6", ATTRS{idProduct}=="811e", MODE="0666", GROUP="lp", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="28e9", ATTRS{idProduct}=="0289", MODE="0666", GROUP="lp", TAG+="uaccess"
+
+# --- Regra genérica: QUALQUER dispositivo cuja interface seja da classe 7 (Printer).
+#     Cobre modelos desconhecidos sem precisar saber o VID/PID.
+SUBSYSTEM=="usb", ENV{ID_USB_INTERFACES}=="*:07*:*", MODE="0666", GROUP="lp", TAG+="uaccess"
