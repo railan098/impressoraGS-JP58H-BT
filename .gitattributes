@@ -1,0 +1,12 @@
+# Garante as quebras de linha corretas em cada plataforma.
+# Sem isso, um .bat com LF puro quebra o cmd.exe do Windows,
+# e um .sh com CRLF da "bad interpreter" no Linux.
+
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+*.sh   text eol=lf
+*.py   text eol=lf
+*.rules text eol=lf
+*.md   text

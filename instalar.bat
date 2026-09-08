@@ -16,6 +16,85 @@ setlocal EnableDelayedExpansion
 title Instalador - Impressora Termica 58mm ESC/POS
 cd /d "%~dp0"
 
+REM ---------------------------------------------------------------------------
+REM  Verificacao de seguranca: o projeto NAO pode ficar em pasta de sistema.
+REM  Isso acontece quando se abre o "cmd como administrador" (que abre em
+REM  C:\Windows\System32) e se roda o git clone sem trocar de pasta.
+REM ---------------------------------------------------------------------------
+set "PASTA_RUIM=0"
+echo %CD% | findstr /i /c:"\Windows\System32" >nul && set "PASTA_RUIM=1"
+echo %CD% | findstr /i /c:"\Windows\SysWOW64" >nul && set "PASTA_RUIM=1"
+echo %CD% | findstr /i /c:"\Program Files"     >nul && set "PASTA_RUIM=1"
+if "%PASTA_RUIM%"=="1" goto :pasta_protegida
+goto :pasta_ok
+
+:pasta_protegida
+echo.
+echo ############################################################################
+echo #  PARE: o projeto esta numa PASTA DE SISTEMA do Windows.                   #
+echo ############################################################################
+echo.
+echo   Pasta atual:
+echo     %CD%
+echo.
+echo   Isso da problema porque:
+echo     - criar o ambiente virtual exige admin toda vez;
+echo     - o Windows Defender pode bloquear ou apagar arquivos;
+echo     - System32 esta no PATH: qualquer .exe ali vira comando global;
+echo     - um comando de limpeza digitado errado ali quebra o Windows.
+echo.
+echo   Isso costuma acontecer ao abrir o "cmd como administrador" (que abre
+echo   em C:\Windows\System32) e rodar o git clone sem trocar de pasta.
+echo.
+set "DESTINO=%USERPROFILE%\Documents\impressoraGS-JP58H-BT"
+echo   Posso copiar o projeto para um lugar correto:
+echo     %DESTINO%
+echo.
+choice /c SN /n /m "   Copiar para la agora? [S/N]: "
+if errorlevel 2 goto :pasta_manual
+
+echo.
+echo   Copiando...
+robocopy "%CD%" "%DESTINO%" /E /NFL /NDL /NJH /NJS /NP >nul
+if not exist "%DESTINO%\imprime_termica.py" (
+    echo   [ERRO] A copia falhou. Faca manualmente, veja abaixo.
+    goto :pasta_manual
+)
+echo   Copiado com sucesso.
+echo.
+echo   ------------------------------------------------------------------------
+echo   AGORA FACA ASSIM:
+echo.
+echo     1. FECHE esta janela.
+echo     2. Vou abrir a pasta nova no Explorador de Arquivos.
+echo     3. De DUPLO CLIQUE no instalar.bat de LA.
+echo     4. Depois, apague a pasta antiga pelo Explorador:
+echo          %CD%
+echo        (apague pelo Explorador, NAO por linha de comando -
+echo         um comando errado dentro do System32 quebra o Windows)
+echo   ------------------------------------------------------------------------
+echo.
+start "" explorer "%DESTINO%"
+pause
+exit /b 0
+
+:pasta_manual
+echo.
+echo   ------------------------------------------------------------------------
+echo   FACA MANUALMENTE:
+echo.
+echo     1. Abra o Explorador de Arquivos
+echo     2. Va ate:  %CD%
+echo     3. Recorte a pasta (Ctrl+X)
+echo     4. Cole em:  %USERPROFILE%\Documents   (Ctrl+V)
+echo     5. Rode o instalar.bat de la
+echo   ------------------------------------------------------------------------
+echo.
+pause
+exit /b 1
+
+:pasta_ok
+
 set "PY=python"
 set "VENV=.venv"
 set "ERROS=0"
@@ -40,9 +119,9 @@ if errorlevel 1 (
         echo   Voce disse que ja instalou o Python 3.14.7. O problema entao e
         echo   que ele nao foi adicionado ao PATH. Duas saidas:
         echo.
-        echo     A) Reinstale marcando a caixa "Add python.exe to PATH"
+        echo     A^) Reinstale marcando a caixa "Add python.exe to PATH"
         echo        na PRIMEIRA tela do instalador; ou
-        echo     B) Painel de Controle ^> Aplicativos ^> Python ^> Modificar
+        echo     B^) Painel de Controle ^> Aplicativos ^> Python ^> Modificar
         echo        ^> Next ^> marque "Add Python to environment variables"
         echo.
         goto :falhou
@@ -74,8 +153,8 @@ if "%EH_ARM%"=="1" (
     echo   #                                                                        #
     echo   #  Isso FUNCIONA, mas da mais trabalho: o pacote libusb-package NAO tem  #
     echo   #  versao para win_arm64, entao este script vai precisar baixar a DLL    #
-    echo   #  ARM64 da libusb direto do GitHub (faco isso automaticamente no        #
-    echo   #  passo 5).                                                             #
+    echo   #  ARM64 da libusb direto do GitHub ^(faco isso automaticamente no        #
+    echo   #  passo 5^).                                                             #
     echo   #                                                                        #
     echo   #  Se algo falhar, a rota mais simples e desinstalar este Python e       #
     echo   #  instalar o "Windows installer (64-bit)" / amd64. O Windows 11 ARM     #

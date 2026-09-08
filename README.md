@@ -81,8 +81,25 @@ serrilha manual não tem), o comando é simplesmente ignorado pelo firmware — 
 
 ### Windows
 
+> ### ⚠️ Onde clonar — leia antes
+> **Nunca clone dentro de `C:\Windows\System32`, `SysWOW64` ou `Program Files`.**
+>
+> Isso acontece sem querer: o "cmd como administrador" **sempre abre em
+> `C:\Windows\System32`**, e um `git clone` ali joga o projeto na pasta de sistema.
+> Os sintomas são criar `.venv` exigindo admin, o Defender bloqueando arquivos, e o
+> risco de um comando de limpeza mal digitado quebrar o Windows.
+>
+> **Clone aqui:**
+> ```powershell
+> cd $env:USERPROFILE\Documents
+> git clone https://github.com/railan098/impressoraGS-JP58H-BT.git
+> cd impressoraGS-JP58H-BT
+> ```
+> O `instalar.bat` detecta pasta de sistema e se recusa a continuar, oferecendo
+> copiar o projeto para o lugar certo.
+
 ```
-1. Baixe/clone este projeto
+1. Clone o projeto em Documentos (NÃO em System32)
 2. DUPLO CLIQUE em  instalar.bat
 3. Siga as instruções na tela
 4. Rode o Zadig (o instalador te avisa se for preciso)
