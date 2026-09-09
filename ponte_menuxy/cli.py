@@ -247,20 +247,42 @@ def quem_ocupa(porta: int) -> Optional[Dict[str, Any]]:
         return None
 
 
+def pedir_janela(porta: int) -> bool:
+    """
+    Pede à ponte que já está rodando para mostrar a janela dela.
+
+    É o comportamento que o operador espera do segundo clique no ícone: ele
+    quer *abrir o aplicativo*, e responder "já está aberto" é tecnicamente
+    correto e praticamente inútil quando a janela está minimizada atrás de
+    tudo. Devolve ``False`` se a instância que está no ar roda sem janela
+    (modo serviço) — aí sim cabe explicar a situação.
+    """
+    import urllib.request
+
+    try:
+        pedido = urllib.request.Request(
+            f"http://127.0.0.1:{porta}/janela", data=b"{}", method="POST")
+        pedido.add_header("Content-Type", "application/json")
+        with urllib.request.urlopen(pedido, timeout=4) as resposta:
+            import json as _json
+            return bool(_json.loads(resposta.read().decode() or "{}").get("ok"))
+    except Exception:
+        return False
+
+
 def _explicar_porta_ocupada(porta: int) -> str:
     outra = quem_ocupa(porta)
     if outra:
         return (
             f"Já existe uma ponte de impressão no ar na porta {porta} "
-            f"(versão {outra.get('versao', 'desconhecida')}).\n\n"
-            "Não é preciso abrir de novo — ela já está funcionando. Procure o "
-            "ícone na barra de tarefas.\n\n"
-            "Se for uma versão antiga que você quer substituir, encerre-a "
-            "primeiro:\n"
-            "    pkill -f ponte.py          (Linux/macOS)\n"
+            f"(versão {outra.get('versao', 'desconhecida')}), e ela está "
+            "rodando sem janela — foi aberta em modo serviço.\n\n"
+            "Ela está imprimindo normalmente; só não tem interface para "
+            "mostrar.\n\n"
+            "Para abrir a janela, encerre-a e abra de novo pelo ícone:\n"
+            "    pkill -f ponte_menuxy      (Linux/macOS)\n"
             "    taskkill /IM pythonw.exe   (Windows)\n\n"
-            f"Ou use outra porta:  menuxy-ponte --porta {porta + 1}\n"
-            "(lembrando de ajustar o endereço no seu sistema)."
+            f"Ou abra uma segunda em outra porta:  menuxy-ponte --porta {porta + 1}"
         )
     return (
         f"A porta {porta} está ocupada por outro programa.\n\n"
@@ -279,7 +301,16 @@ def servir(cfg: Dict[str, Any], args) -> int:
         instancia = servidor.criar(cfg)
     except OSError as erro:
         if erro.errno in (errno.EADDRINUSE, getattr(errno, "WSAEADDRINUSE", 10048)):
-            mensagem = _explicar_porta_ocupada(int(cfg["porta"]))
+            porta = int(cfg["porta"])
+            # Antes de reclamar: se quem está na porta é uma ponte nossa COM
+            # janela, o clique do operador vira "traga-a para a frente" — que
+            # é o que ele quis dizer. Só quando isso não é possível é que a
+            # explicação aparece.
+            if quem_ocupa(porta) and pedir_janela(porta):
+                print(f"[ok] a ponte já estava aberta na porta {porta}; "
+                      "trouxe a janela para a frente.")
+                return 0
+            mensagem = _explicar_porta_ocupada(porta)
         else:
             mensagem = f"Não foi possível abrir a porta {cfg['porta']}:\n\n{erro}"
 

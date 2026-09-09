@@ -477,13 +477,38 @@ def abrir(servidor, cfg: Dict[str, Any]) -> int:
 
     Ponte.ao_registrar = staticmethod(ao_imprimir)
 
+    def ao_pedir_janela() -> None:
+        """Outra cópia do aplicativo pediu a janela. Chamado pela thread HTTP."""
+        eventos.put("MOSTRAR||")
+
+    Ponte.ao_mostrar_janela = staticmethod(ao_pedir_janela)
+
+    def trazer_para_frente() -> None:
+        raiz.deiconify()
+        raiz.lift()
+        # O -topmost momentâneo é o que realmente funciona: sem ele, GNOME e
+        # Windows costumam apenas piscar o botão na barra em vez de levantar a
+        # janela, porque o pedido não veio de uma interação do usuário com ELA.
+        try:
+            raiz.attributes("-topmost", True)
+            raiz.after(400, lambda: raiz.attributes("-topmost", False))
+        except Exception:
+            pass
+        try:
+            raiz.focus_force()
+        except Exception:
+            pass
+
     def drenar():
         nonlocal impressos
         try:
             while True:
                 evento = eventos.get_nowait()
                 marca, tamanho, detalhe = evento.split("|", 2)
-                if marca == "1":
+                if marca == "MOSTRAR":
+                    trazer_para_frente()
+                    anotar("outra cópia do aplicativo foi aberta; janela trazida à frente")
+                elif marca == "1":
                     impressos += 1
                     rotulo_contagem.configure(text=f"{impressos} nesta sessão")
                     anotar(f"impresso em {detalhe} ({tamanho} bytes)")

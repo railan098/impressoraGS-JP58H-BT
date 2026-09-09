@@ -88,6 +88,9 @@ class Ponte(BaseHTTPRequestHandler):
     cfg: Dict[str, Any] = {}
     limitador: Optional[Limitador] = None
     ao_registrar: Optional[Callable[[bool, str, int], None]] = None
+    # Preenchido pela janela. Enquanto for None, esta instância não tem
+    # interface — modo serviço —, e a rota /janela responde dizendo isso.
+    ao_mostrar_janela: Optional[Callable[[], None]] = None
 
     def log_message(self, formato, *args):
         pass    # a sondagem de 3s do agente encheria o terminal
@@ -213,12 +216,33 @@ class Ponte(BaseHTTPRequestHandler):
     def do_POST(self):
         caminho = self.path.split("?", 1)[0].rstrip("/")
 
-        if caminho not in ("/imprimir", "/raw", "/gaveta"):
+        if caminho not in ("/imprimir", "/raw", "/gaveta", "/janela"):
             self._responder({"ok": False, "erro": "rota desconhecida"}, 404)
             return
 
         if not self._origem_permitida():
             self._responder({"ok": False, "erro": "origem não autorizada"}, 403)
+            return
+
+        if caminho == "/janela":
+            # Uma segunda cópia do aplicativo bate aqui quando o operador clica
+            # no ícone com a ponte já aberta: ele quis ABRIR o aplicativo, e
+            # responder "já está aberto" seria tecnicamente correto e
+            # praticamente inútil com a janela minimizada atrás de tudo.
+            #
+            # Fica antes do limitador de propósito: levantar uma janela não é
+            # trabalho de impressão, e não pode ser barrado pelo teto que
+            # existe para proteger a bobina.
+            if self.ao_mostrar_janela is None:
+                self._responder(
+                    {"ok": False, "erro": "esta ponte está rodando sem janela"}, 409)
+                return
+            try:
+                self.ao_mostrar_janela()
+            except Exception as erro:
+                self._responder({"ok": False, "erro": f"não consegui mostrar: {erro}"}, 500)
+                return
+            self._responder({"ok": True})
             return
 
         if self.limitador and not self.limitador.permitir():

@@ -51,6 +51,12 @@ A ponte vira **aplicativo**: instalável, com janela de configuração e ícone 
 * **Uma opção de configuração agora grava e sai**, em vez de cair no servidor.
   Na v2, `--origens ...` gravava e subia a ponte, e um instalador que a
   chamasse ficava pendurado ali para sempre. Para as duas coisas: `--servir`.
+* **Clicar no ícone com a ponte já aberta agora levanta a janela dela**, em vez
+  de mostrar um erro. O operador que clica no ícone quer *abrir o aplicativo*;
+  responder "já está aberto" é tecnicamente correto e praticamente inútil com a
+  janela minimizada atrás de tudo. A segunda cópia pede a janela à primeira
+  (`POST /janela`) e sai em silêncio. Só quando a instância no ar roda sem
+  janela — modo serviço — é que a explicação aparece.
 * **Falha ao subir deixava o ícone mudo.** Aberto pelo atalho, o aplicativo
   roda com `Terminal=false`: a mensagem de erro ia para uma saída que não
   existe, e clicar no ícone não fazia nada. Agora a falha aparece numa caixa de

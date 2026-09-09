@@ -13,6 +13,7 @@ GET  /saude         { ok, versao } — não toca na impressora
 POST /imprimir      { texto, cortar?, impressora?, colunas?, codepage?, gaveta? }
 POST /raw           { base64, impressora? }
 POST /gaveta        { impressora? }
+POST /janela        traz a janela desta ponte para a frente
 ```
 
 ---
@@ -113,6 +114,18 @@ controle é todo seu.
 
 Aciona a gaveta de dinheiro sem imprimir. `{ "impressora": "..." }`, tudo
 opcional.
+
+## `POST /janela`
+
+Traz a janela desta ponte para a frente. Corpo vazio.
+
+Quem chama é o **próprio aplicativo**: ao ser aberto com uma ponte já no ar, em
+vez de reclamar que a porta está ocupada ele pede a janela à instância que já
+existe e sai em silêncio. É o que o operador quis dizer ao clicar no ícone.
+
+Responde `409` quando a ponte no ar roda sem janela (modo serviço). Fica fora
+do teto por minuto: levantar uma janela não é trabalho de impressão e não pode
+ser barrado por um limite que existe para proteger a bobina.
 
 ---
 
