@@ -316,6 +316,50 @@ def carregar_backend(caminho_dll: Optional[str] = None):
     return usb.backend.libusb1.get_backend()
 
 
+def _erro_driver_incompativel() -> str:
+    """Mensagem para quando o libusb enxerga o dispositivo mas nao o abre.
+
+    No Windows o libusb consegue *enumerar* qualquer dispositivo (por isso
+    o --listar funciona), mas libusb_open() so funciona se o driver for
+    WinUSB/libusbK. Com o usbprint.sys do Windows ainda anexado, a abertura
+    falha com LIBUSB_ERROR_NOT_SUPPORTED, que o PyUSB converte em
+    NotImplementedError - um erro que nao diz nada ao usuario final.
+    """
+    NOVA_LINHA = chr(10)
+    if platform.system() == "Windows":
+        return (
+            "" + NOVA_LINHA +
+            "[ERRO] A impressora foi ENCONTRADA, mas o Windows nao deixa abri-la." + NOVA_LINHA +
+            "" + NOVA_LINHA +
+            "  Causa: ela ainda esta no driver 'usbprint' do Windows. O libusb" + NOVA_LINHA +
+            "  consegue LISTAR o dispositivo, mas so consegue ABRIR quem estiver" + NOVA_LINHA +
+            "  no driver WinUSB." + NOVA_LINHA +
+            "" + NOVA_LINHA +
+            "  Solucao (passo 2.3 do README) - trocar o driver com o Zadig:" + NOVA_LINHA +
+            "    1. Baixe o Zadig em https://zadig.akeo.ie/ (e portatil)" + NOVA_LINHA +
+            "    2. Botao direito no zadig.exe > Executar como administrador" + NOVA_LINHA +
+            "    3. Menu Options > marque 'List All Devices'" + NOVA_LINHA +
+            "    4. Na lista, escolha a impressora (POS-58 / USB Printing Support)" + NOVA_LINHA +
+            "    5. No campo do driver, deixe WinUSB (nao libusb-win32, nao libusbK)" + NOVA_LINHA +
+            "    6. Clique em 'Replace Driver' e aceite o aviso do Windows" + NOVA_LINHA +
+            "    7. Desconecte e reconecte o cabo USB, e rode este script de novo" + NOVA_LINHA +
+            "" + NOVA_LINHA +
+            "  Para conferir o driver atual, no PowerShell:" + NOVA_LINHA +
+            "    Get-PnpDevice | ? InstanceId -like '*VID_0416*PID_5011*'" + NOVA_LINHA +
+            "" + NOVA_LINHA +
+            "  Depois do Zadig a impressora SOME de 'Impressoras e Scanners'." + NOVA_LINHA +
+            "  Isso e esperado e e justamente o objetivo." + NOVA_LINHA +
+            "" + NOVA_LINHA +
+            "" + NOVA_LINHA
+        )
+    return (
+        "" + NOVA_LINHA +
+        "[ERRO] O dispositivo foi encontrado, mas nao pode ser aberto pelo libusb." + NOVA_LINHA +
+        "  Verifique as permissoes (regra udev) e se outro processo o esta usando." + NOVA_LINHA +
+        "" + NOVA_LINHA +
+        "" + NOVA_LINHA
+    )
+
 def _erro_sem_backend() -> str:
     """Mensagem de ajuda para quando nenhum backend libusb é encontrado."""
     if platform.system() == "Windows":
@@ -535,13 +579,20 @@ def preparar_dispositivo(dev, intf):
 
     # --- Ativa a configuração. Se já estiver ativa, set_configuration() pode
     #     falhar com "Resource busy" — o que é inofensivo.
+    #     No Windows/WinUSB o libusb nao implementa get_configuration nem
+    #     set_configuration e o PyUSB levanta NotImplementedError. La o
+    #     dispositivo ja vem configurado pelo driver, entao o descritor da
+    #     primeira configuracao serve e nenhuma chamada ao device e precisa.
     try:
         cfg_ativa = dev.get_active_configuration()
-    except usb.core.USBError:
+    except (usb.core.USBError, NotImplementedError):
         cfg_ativa = None
     if cfg_ativa is None:
-        dev.set_configuration()
-        cfg_ativa = dev.get_active_configuration()
+        try:
+            dev.set_configuration()
+            cfg_ativa = dev.get_active_configuration()
+        except (usb.core.USBError, NotImplementedError):
+            cfg_ativa = dev[0]
 
     # --- Reobtém a interface a partir da configuração ativa
     if intf is None:
@@ -832,6 +883,30 @@ def hexint(valor: str) -> int:
     return int(valor, 16) if valor.lower().startswith("0x") else int(valor, 16)
 
 
+def _imprimir_via_usbprint(dados: bytes, vid=None, pid=None) -> None:
+    """Imprime pelo driver usbprint.sys do Windows (sem libusb, sem Zadig).
+
+    E o caminho que funciona em Windows sobre ARM (Snapdragon) sem trocar
+    driver: o usbprint ja vem anexado pelo Windows e expoe um device
+    interface que aceita bytes ESC/POS crus. Veja usbprint_win.py.
+
+    Args:
+        dados: fluxo ESC/POS ja montado.
+        vid, pid: filtro opcional de dispositivo.
+
+    Raises:
+        RuntimeError: se o modulo nao existir ou nao houver impressora.
+    """
+    try:
+        import usbprint_win
+    except ImportError as erro:
+        raise RuntimeError(
+            "O modulo usbprint_win.py nao foi encontrado ao lado do "
+            "script. Baixe o projeto completo." ) from erro
+
+    escritos = usbprint_win.imprimir(dados, vid, pid)
+    print(f"[OK] {escritos} bytes enviados pelo driver usbprint.")
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Impressão ESC/POS direta via USB (58mm) — Windows ARM e Linux.",
@@ -858,6 +933,9 @@ def main() -> int:
                         help="caminho para libusb-1.0.dll / .so (ou env LIBUSB_PATH)")
     parser.add_argument("--abrir-gaveta", action="store_true",
                         help="envia o pulso de abertura da gaveta (RJ11)")
+    parser.add_argument("--usbprint", action="store_true",
+                        help="Windows: escreve pelo driver usbprint em vez do libusb "
+                             "(dispensa o Zadig; e o padrao se o libusb nao abrir)")
     parser.add_argument("--esquecer", action="store_true",
                         help="apaga a impressora memorizada e sai")
     parser.add_argument("--config", action="store_true",
@@ -936,13 +1014,34 @@ def main() -> int:
                                  cortar=not args.sem_corte)
             if args.abrir_gaveta:
                 dados += ESCPOS.ABRE_GAVETA
-            imprimir_pyusb(dados, args.vid, args.pid, backend)
+            if args.usbprint:
+                _imprimir_via_usbprint(dados, args.vid, args.pid)
+            else:
+                try:
+                    imprimir_pyusb(dados, args.vid, args.pid, backend)
+                except NotImplementedError:
+                    # libusb enxergou mas nao conseguiu abrir: no Windows
+                    # isso e o usbprint.sys ainda anexado. Em vez de exigir
+                    # o Zadig, usamos o proprio usbprint como transporte.
+                    if platform.system() != "Windows":
+                        raise
+                    print("[!] O libusb nao conseguiu abrir o dispositivo "
+                          "(driver usbprint anexado).")
+                    print("[!] Tentando pelo proprio usbprint, sem Zadig...")
+                    _imprimir_via_usbprint(dados, args.vid, args.pid)
         print("\n>>> Concluído. Confira o papel na impressora.\n")
         return 0
 
     except usb.core.NoBackendError:
         sys.stderr.write(_erro_sem_backend())
         return 3
+
+    # O PyUSB traduz LIBUSB_ERROR_NOT_SUPPORTED em NotImplementedError. No
+    # Windows isso quer dizer, quase sempre, 'driver errado' - e nao que
+    # faltou implementar algo. Sem este ramo o usuario so ve um traceback.
+    except NotImplementedError:
+        sys.stderr.write(_erro_driver_incompativel())
+        return 7
 
     except usb.core.USBError as erro:
         sys.stderr.write("\n" + "!" * 72 + "\n")

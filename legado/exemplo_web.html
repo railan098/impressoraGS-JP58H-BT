@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Exemplo — Ponte de Impressão</title>
+<style>
+  :root { --borda:#d8dbe0; --fundo:#f6f7f9; --texto:#1b1d21; --suave:#666c75;
+          --ok:#0a7a4a; --erro:#c0392b; --acento:#2b6cb0; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:24px; background:var(--fundo); color:var(--texto);
+         font:15px/1.5 "Segoe UI", system-ui, sans-serif; }
+  .painel { max-width:760px; margin:0 auto; }
+  .cartao { background:#fff; border:1px solid var(--borda); border-radius:10px;
+            padding:18px; margin-bottom:16px; }
+  h1 { font-size:21px; margin:0 0 4px; }
+  h2 { font-size:15px; margin:0 0 10px; color:var(--suave);
+       text-transform:uppercase; letter-spacing:.04em; }
+  p.sub { margin:0 0 20px; color:var(--suave); }
+  #situacao { font-weight:600; }
+  .pilula { display:inline-block; width:10px; height:10px; border-radius:50%;
+            background:#bbb; margin-right:8px; vertical-align:middle; }
+  .ok  { background:var(--ok); }
+  .mau { background:var(--erro); }
+  textarea { width:100%; min-height:120px; padding:10px; font-family:Consolas,
+             monospace; font-size:14px; border:1px solid var(--borda);
+             border-radius:6px; resize:vertical; }
+  button { background:var(--acento); color:#fff; border:0; border-radius:6px;
+           padding:10px 18px; font-size:15px; cursor:pointer; }
+  button:hover { filter:brightness(1.08); }
+  button:disabled { background:#9aa3ad; cursor:not-allowed; }
+  .linha { display:flex; gap:14px; align-items:center; flex-wrap:wrap;
+           margin-top:12px; }
+  label.op { font-size:14px; color:var(--suave); }
+  pre { background:#1b1d21; color:#e6e6e6; padding:14px; border-radius:8px;
+        overflow-x:auto; font-size:13px; line-height:1.45; }
+  #resposta { margin-top:12px; font-size:14px; }
+  .certo { color:var(--ok); }
+  .errado { color:var(--erro); }
+</style>
+</head>
+<body>
+<div class="painel">
+
+  <h1>Ponte de Impressão</h1>
+  <p class="sub">Exemplo de como o seu software web manda imprimir na térmica 58mm.</p>
+
+  <div class="cartao">
+    <h2>Situação da ponte</h2>
+    <div id="situacao"><span class="pilula"></span>verificando…</div>
+    <div class="linha">
+      <button id="btVerificar">Verificar de novo</button>
+    </div>
+  </div>
+
+  <div class="cartao">
+    <h2>Imprimir</h2>
+    <textarea id="texto">CUPOM DE TESTE
+------------------------
+Item              R$ 10,00
+Item 2            R$  5,50
+------------------------
+TOTAL             R$ 15,50
+
+Obrigado pela preferencia!</textarea>
+    <div class="linha">
+      <button id="btImprimir">Imprimir</button>
+      <label class="op"><input type="checkbox" id="cortar" checked> cortar papel</label>
+      <label class="op"><input type="checkbox" id="gaveta"> abrir gaveta</label>
+    </div>
+    <div id="resposta"></div>
+  </div>
+
+  <div class="cartao">
+    <h2>O código para o seu sistema</h2>
+    <pre><code>async function imprimir(texto) {
+  const r = await fetch("http://127.0.0.1:9100/imprimir", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ texto: texto, cortar: true })
+  });
+  const dados = await r.json();
+  if (!dados.ok) throw new Error(dados.erro);
+  return dados.bytes;
+}</code></pre>
+  </div>
+
+</div>
+
+<script>
+const PONTE = "http://127.0.0.1:9100";
+
+const elSituacao = document.getElementById("situacao");
+const elResposta = document.getElementById("resposta");
+const btImprimir = document.getElementById("btImprimir");
+
+async function verificar() {
+  elSituacao.innerHTML = '<span class="pilula"></span>verificando…';
+  try {
+    const r = await fetch(PONTE + "/status");
+    const d = await r.json();
+    if (d.impressora_presente) {
+      elSituacao.innerHTML =
+        '<span class="pilula ok"></span>Ponte no ar e impressora conectada' +
+        ' <span style="color:var(--suave);font-weight:400">(' + d.sistema +
+        ', ' + d.impressos + ' impressões)</span>';
+      btImprimir.disabled = false;
+    } else {
+      elSituacao.innerHTML =
+        '<span class="pilula mau"></span>Ponte no ar, mas nenhuma impressora' +
+        ' — confira o cabo USB';
+      btImprimir.disabled = true;
+    }
+  } catch (e) {
+    // fetch rejeitado = ponte fora do ar, ou origem bloqueada pelo CORS.
+    elSituacao.innerHTML =
+      '<span class="pilula mau"></span>Ponte não respondeu — abra o' +
+      ' <code>ponte.bat</code> na máquina da impressora';
+    btImprimir.disabled = true;
+  }
+}
+
+async function imprimir() {
+  btImprimir.disabled = true;
+  elResposta.textContent = "enviando…";
+  try {
+    const r = await fetch(PONTE + "/imprimir", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        texto: document.getElementById("texto").value,
+        cortar: document.getElementById("cortar").checked,
+        abrir_gaveta: document.getElementById("gaveta").checked
+      })
+    });
+    const d = await r.json();
+    if (d.ok) {
+      elResposta.innerHTML = '<span class="certo">Impresso: ' + d.bytes +
+                             ' bytes enviados.</span>';
+    } else {
+      elResposta.innerHTML = '<span class="errado">Erro: ' + d.erro + '</span>';
+    }
+  } catch (e) {
+    elResposta.innerHTML = '<span class="errado">Não foi possível falar com a ' +
+                           'ponte: ' + e.message + '</span>';
+  } finally {
+    btImprimir.disabled = false;
+    verificar();
+  }
+}
+
+document.getElementById("btVerificar").addEventListener("click", verificar);
+btImprimir.addEventListener("click", imprimir);
+verificar();
+</script>
+</body>
+</html>
