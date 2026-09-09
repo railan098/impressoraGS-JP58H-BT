@@ -51,6 +51,12 @@ A ponte vira **aplicativo**: instalável, com janela de configuração e ícone 
 * **Uma opção de configuração agora grava e sai**, em vez de cair no servidor.
   Na v2, `--origens ...` gravava e subia a ponte, e um instalador que a
   chamasse ficava pendurado ali para sempre. Para as duas coisas: `--servir`.
+* **Falha ao subir deixava o ícone mudo.** Aberto pelo atalho, o aplicativo
+  roda com `Terminal=false`: a mensagem de erro ia para uma saída que não
+  existe, e clicar no ícone não fazia nada. Agora a falha aparece numa caixa de
+  aviso. E o caso comum — porta ocupada — é diagnosticado: a ponte consulta a
+  porta e, se quem está lá é outra ponte, diz a versão dela e que não é preciso
+  abrir de novo.
 * Corpo maior que o teto responde **413 legível** em vez de derrubar a conexão.
   A ponte drena o excesso antes de responder — respondendo com o cliente ainda
   enviando, o navegador recebia "connection reset" e a página dizia "a ponte
