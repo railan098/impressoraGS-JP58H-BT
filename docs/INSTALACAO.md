@@ -33,15 +33,59 @@ Sai `dist\PonteMenuxy.exe`.
    quiser. **Nunca em `C:\Windows\System32` nem em `Program Files`**: a
    primeira é a pasta do sistema, e a segunda exige administrador para
    escrever.
-2. Duplo clique.
-3. Na aba **Configuração**: marca *Iniciar automaticamente ao ligar o
-   computador*, preenche as *Origens permitidas* com o endereço do sistema e
-   clica em **Salvar**.
+2. Duplo clique. **Na primeira vez o Windows vai avisar** — veja o quadro
+   abaixo; é esperado, e não significa vírus.
+3. Na aba **Configuração**: clica em *Iniciar junto com o computador*,
+   preenche as *Origens permitidas* com o endereço do sistema e clica em
+   **Salvar**.
 4. Na aba **Impressoras**: escolhe a impressora, clica em **Usar esta** e em
    **Imprimir teste**.
 
 O botão *Criar atalho na área de trabalho* põe o ícone fora da pasta do
 programa, que é de onde o operador vai abrir todo dia.
+
+### "O Windows protegeu o seu computador"
+
+Aparece enquanto o executável **não é assinado** por um certificado de código.
+Não é detecção de vírus: é o SmartScreen dizendo que nunca viu este arquivo
+antes. Um programa novo, de qualquer autor, começa assim.
+
+```
+O Windows protegeu o seu computador
+O Microsoft Defender SmartScreen impediu a inicializacao de um
+aplicativo nao reconhecido.
+
+        [ Mais informacoes ]          [ Nao executar ]
+                 |
+                 v
+Aplicativo:  PonteMenuxy.exe
+Editor:      Editor desconhecido
+
+        [ Executar assim mesmo ]      [ Nao executar ]
+```
+
+**Clique em *Mais informações* e depois em *Executar assim mesmo*.** Só na
+primeira vez — o Windows lembra da escolha para aquele arquivo.
+
+Três coisas ajudam a diminuir o atrito:
+
+* **Entregue por pendrive ou pasta de rede**, não por download. Arquivo baixado
+  carrega uma marca de origem (*Mark of the Web*) que deixa o aviso mais duro.
+* **Se veio por download**, dá para tirar a marca antes de abrir: botão direito
+  no `.exe` → **Propriedades** → marcar **Desbloquear** → *OK*. Pelo PowerShell:
+
+  ```powershell
+  Unblock-File .\PonteMenuxy.exe
+  ```
+
+* **Windows 11 com *Controle de Aplicativo Inteligente* ligado** (vem ligado
+  só em instalações limpas de fábrica) **não oferece "Executar assim mesmo"** —
+  ele bloqueia e pronto. Nesse caso só o executável assinado funciona. Para
+  saber se é o caso: *Segurança do Windows* → *Controle de aplicativos e
+  navegador* → *Controle de aplicativo inteligente*.
+
+Para o aviso sumir de vez, o executável precisa ser assinado — veja
+[EMPACOTAMENTO.md](EMPACOTAMENTO.md#assinatura-digital).
 
 ## Windows — a partir do código
 

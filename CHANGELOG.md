@@ -74,6 +74,32 @@
 * **Minimizar deixa dito que minimizou.** O X da janela parecia encerrar o
   programa, e ele continuava de pé segurando a porta 9100.
 
+### Empacotamento
+
+* **Assinatura digital no `gerar_exe.bat`**, opcional e sem quebrar o build.
+  Configure `MENUXY_CERT_SHA1` (token EV/HSM), `MENUXY_CERT_NOME` ou
+  `MENUXY_CERT_PFX`; sem nenhum deles o script explica o que o cliente vai ver
+  e segue. Ele acha o `signtool.exe` no PATH ou no Windows SDK, assina com
+  SHA-256, **carimba a hora** — sem o carimbo a assinatura morre com o
+  certificado e os executáveis já entregues voltam a dar aviso — e **confere a
+  assinatura depois**, porque uma cadeia incompleta só apareceria na máquina do
+  cliente, tarde.
+
+* **Recurso de versão no `.exe`.** Estava `version=None`: o executável aparecia
+  nas Propriedades sem nome de produto, empresa nem versão. Agora é gerado a
+  partir do `VERSAO` de `ponte_menuxy/__init__.py`, a fonte única — o número não
+  precisa ser mantido em dois lugares. Um binário anônimo pesa contra na
+  heurística do SmartScreen e não diz nada a quem abre as Propriedades para
+  decidir se confia.
+
+* **Documentação dos três controles do Windows**, que não são a mesma coisa e
+  têm saídas diferentes: *Mark of the Web* (entregar por pendrive, ou
+  Desbloquear nas Propriedades), *SmartScreen* (assinar; enquanto isso, "Mais
+  informações → Executar assim mesmo") e *Controle de Aplicativo Inteligente*
+  do Windows 11, que **não** oferece "executar assim mesmo" — ali só a
+  assinatura resolve. O passo a passo do operador está em `INSTALACAO.md`; as
+  opções de certificado, em `EMPACOTAMENTO.md`.
+
 ### Verificação
 
 * 115 checagens (eram 98). As dezessete novas cobrem a escolha da interface USB num

@@ -47,11 +47,88 @@ PonteMenuxy.exe --diagnostico
 
 O diagnóstico tem que dizer `empacotado : sim (PyInstaller)`.
 
-**Assinatura digital.** O executável não é assinado, e o SmartScreen vai avisar
-o cliente na primeira execução ("Windows protegeu o computador" → *Mais
-informações* → *Executar assim mesmo*). Para eliminar o aviso é preciso um
-certificado de assinatura de código, que é pago e nominal — vale a pena quando
-a base de clientes cresce.
+---
+
+## Assinatura digital
+
+Não existe como "pular" o SmartScreen: ele é **reputação**, não antivírus.
+O caminho é deixar de ser desconhecido — assinando. Sem assinatura o build não
+falha; sai um `.exe` que funciona, com aviso na primeira execução (o passo a
+passo para o operador está em [INSTALACAO.md](INSTALACAO.md)).
+
+**São três controles diferentes**, e confundi-los faz perder tempo:
+
+| Controle | O que é | Como sai |
+|---|---|---|
+| **Mark of the Web** | marca de "veio da internet" no arquivo baixado | entregar por pendrive, ou *Propriedades → Desbloquear* |
+| **SmartScreen** | reputação do binário e do editor | assinar; enquanto isso, *Mais informações → Executar assim mesmo* |
+| **Controle de Aplicativo Inteligente** | Windows 11, só em instalação limpa | **não tem "executar assim mesmo"** — só assinatura resolve |
+
+### Que certificado
+
+| | Custo/ano | Efeito |
+|---|---|---|
+| **OV** (organização) | ~US$ 200–400 | assina; a reputação ainda se acumula com os downloads |
+| **EV** (validação estendida) | ~US$ 300–600 | caminho mais rápido para reputação |
+| **Certum Open Source** | dezenas de euros | para projeto de código aberto — **este é MIT, então se qualifica** |
+
+Dois detalhes que pegam de surpresa:
+
+* Desde **junho de 2023** a chave privada precisa morar em hardware (token
+  FIPS 140-2) ou HSM na nuvem. Não se recebe mais um `.pfx` por e-mail.
+* **Sempre carimbe a hora** (`/tr`). Sem o carimbo, a assinatura morre junto
+  com o certificado e os executáveis já entregues voltam a dar aviso.
+
+### Como usar no build
+
+O `gerar_exe.bat` assina sozinho quando encontra a configuração, e apenas avisa
+quando não encontra. Escolha **uma** das três formas:
+
+```bat
+REM  Token EV ou HSM — a forma precisa, pela impressao digital do certificado
+set MENUXY_CERT_SHA1=a1b2c3d4e5f6...
+
+REM  ou pelo nome do titular, se so houver um certificado na loja
+set MENUXY_CERT_NOME=Railan Alves
+
+REM  ou arquivo .pfx (so certificado antigo; os novos exigem hardware)
+set MENUXY_CERT_PFX=C:\caminho\cert.pfx
+set MENUXY_CERT_SENHA=...
+
+REM  opcional: outro carimbador
+set MENUXY_CARIMBO=http://timestamp.sectigo.com
+
+empacotar\windows\gerar_exe.bat
+```
+
+Para achar a impressão digital do que está instalado:
+
+```powershell
+Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert |
+    Format-List Subject, Thumbprint, NotAfter
+```
+
+O script procura o `signtool.exe` no PATH e no Windows SDK, assina com SHA-256,
+carimba a hora e **confere a assinatura depois** — assinar "com sucesso" e a
+cadeia não fechar na máquina do cliente é um erro que só apareceria lá, e tarde.
+Ao final ele diz `Assinado digitalmente: sim` ou `nao`.
+
+### O que já é de graça
+
+* **Recurso de versão** no `.exe`: nome do produto, empresa, versão e copyright
+  aparecem nas Propriedades. É gerado a partir do arquivo `VERSION`, então o
+  número não precisa ser mantido em dois lugares. Executável anônimo pesa
+  contra na heurística e não diz nada a quem abre as Propriedades para decidir
+  se confia.
+* **UPX desligado** — comprimido levanta mais suspeita do que os 8 MB poupados.
+* **Falso positivo do Defender** é comum com `--onefile`, porque o executável
+  se descompacta no temp. Submeta em `microsoft.com/wdsi/filesubmission`:
+  costuma sair em poucos dias e vale para todos os clientes de uma vez.
+
+> **O que não fazer:** desligar o SmartScreen por registro ou GPO na máquina do
+> cliente. Funciona, e derruba a proteção do balcão inteiro para resolver um
+> aviso que aparece uma vez. Se a frota é gerenciada, a decisão é do
+> administrador dela — não algo que o seu instalador deva fazer sozinho.
 
 ---
 
@@ -121,9 +198,14 @@ Na dúvida, prefira o `.deb` — Python puro não tem esse problema.
    o `--versao` e o `/status` leem de lá.
 2. Anote a mudança em `CHANGELOG.md`.
 3. Rode o verificador: `python3 testes/verificar_ponte.py`.
-4. Gere os pacotes dos três destinos.
-5. Confira cada um numa máquina limpa, com `--diagnostico`.
-6. Marque a versão no git: `git tag -a v3.0.1 -m "..."`.
+4. Espelhe o número no arquivo `VERSION` (o `.deb` lê dele).
+5. Gere os pacotes dos três destinos.
+6. **Confira que o `.exe` saiu assinado** — o `gerar_exe.bat` diz
+   `Assinado digitalmente: sim` ao final. Saindo `nao`, o cliente vai ver o
+   aviso do SmartScreen.
+7. Confira cada um numa máquina limpa, com `--diagnostico`. No Windows, olhe
+   também *Propriedades → Detalhes*: nome, versão e empresa têm de aparecer.
+8. Marque a versão no git: `git tag -a v3.0.1 -m "..."`.
 
 ## Reprodutibilidade
 
