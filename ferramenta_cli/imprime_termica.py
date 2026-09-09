@@ -48,12 +48,17 @@ def _python_do_venv() -> Optional[str]:
         O caminho do python do venv, ou ``None`` se não houver nenhum.
     """
     base = os.path.dirname(os.path.abspath(__file__))
-    candidatos = [
-        os.path.join(base, ".venv", "Scripts", "python.exe"),  # Windows
-        os.path.join(base, ".venv", "bin", "python"),          # Linux / macOS
-        os.path.join(base, "venv", "Scripts", "python.exe"),
-        os.path.join(base, "venv", "bin", "python"),
-    ]
+    # A pasta acima também entra na busca: desde a v3 esta ferramenta mora em
+    # ``ferramenta_cli/``, e o ambiente virtual continua na raiz do projeto.
+    raiz = os.path.dirname(base)
+    candidatos = []
+    for pasta in (base, raiz):
+        candidatos += [
+            os.path.join(pasta, ".venv", "Scripts", "python.exe"),  # Windows
+            os.path.join(pasta, ".venv", "bin", "python"),          # Linux / macOS
+            os.path.join(pasta, "venv", "Scripts", "python.exe"),
+            os.path.join(pasta, "venv", "bin", "python"),
+        ]
     for caminho in candidatos:
         if os.path.isfile(caminho) and os.path.abspath(caminho) != os.path.abspath(sys.executable):
             return caminho

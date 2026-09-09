@@ -1,0 +1,58 @@
+# Metadados do projeto.
+#
+# A ponte é distribuída como .exe (Windows) e .deb (Linux), não pelo PyPI —
+# quem instala num balcão não digita `pip install`. Este arquivo existe para
+# quem quer `pip install -e .` durante o desenvolvimento, e para declarar num
+# lugar só o que as ferramentas precisam saber.
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "menuxy-ponte"
+dynamic = ["version"]
+description = "Ponte de impressão local: deixa um sistema web imprimir na impressora térmica do balcão"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.8"
+authors = [{ name = "Railan Alves", email = "Saobentomaqsbm@gmail.com" }]
+keywords = ["escpos", "impressora", "termica", "pdv", "cupom", "printer", "thermal"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Win32 (MS Windows)",
+    "Environment :: X11 Applications",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: Portuguese (Brazilian)",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS :: MacOS X",
+    "Programming Language :: Python :: 3",
+    "Topic :: Printing",
+]
+
+# Nenhuma dependência obrigatória: o caminho `sistema:` só usa a biblioteca
+# padrão. É o que permite o executável rodar num balcão sem nada instalado.
+dependencies = []
+
+[project.optional-dependencies]
+usb = ["pyusb>=1.2.1", "libusb-package>=1.0.26 ; sys_platform == 'win32'"]
+serial = ["pyserial>=3.5"]
+empacotar = ["pyinstaller>=6.0"]
+
+[project.scripts]
+menuxy-ponte = "ponte_menuxy.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/railan098/impressoraGS-JP58H-BT"
+Documentation = "https://github.com/railan098/impressoraGS-JP58H-BT/tree/main/docs"
+
+[tool.setuptools]
+packages = ["ponte_menuxy", "ponte_menuxy.backends"]
+
+[tool.setuptools.dynamic]
+version = { attr = "ponte_menuxy.VERSAO" }
+
+[tool.setuptools.package-data]
+ponte_menuxy = ["recursos/*"]

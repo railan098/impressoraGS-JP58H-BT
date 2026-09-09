@@ -9,12 +9,12 @@ __pycache__/
 venv/
 env/
 
-# ---- PyInstaller ----
+# ---- Empacotamento (gerado; nao versionar) ----
 build/
 dist/
-*.spec
+*.deb
 
-# ---- Binarios da libusb (baixados pelo instalador, nao versionar) ----
+# ---- Binarios da libusb (baixados pelo instalador) ----
 libusb-1.0.dll
 libusb_tmp.7z
 VS2025/
@@ -22,7 +22,13 @@ VS2022/
 
 # ---- Driver original do fabricante (grande e nao funciona em ARM) ----
 POS58Setup.exe
-POS-58
+POS-58/
+
+# ---- Configuracao e registro locais (moram no perfil do usuario, mas
+#      um teste mal-comportado pode deixar copia aqui) ----
+ponte_config.json
+ponte.log
+impressora.json
 
 # ---- Sistema operacional ----
 .DS_Store
@@ -34,6 +40,3 @@ desktop.ini
 .idea/
 *.swp
 *~
-
-# Config local da impressora (gerado em runtime)
-impressora.json

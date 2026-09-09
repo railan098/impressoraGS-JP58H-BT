@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ponte de Impressão — página de exemplo</title>
+<!--
+  Página de exemplo e de diagnóstico da Ponte de Impressão.
+
+  Abra este arquivo direto no navegador DA MÁQUINA onde a ponte está rodando.
+  Ela serve para duas coisas:
+
+    1. Provar que a ponte está no ar e imprimindo, sem envolver o seu sistema.
+       Quando o cupom não sai, é aqui que você descobre se o problema é a ponte
+       ou o sistema que fala com ela.
+    2. Ser o ponto de partida do seu próprio código: tudo que esta página faz
+       está em exemplos/js/ponte-cliente.js, que você copia para o seu projeto.
+
+  Observação sobre origens: aberta como arquivo (file://), a origem que o
+  navegador manda é "null", e a ponte só aceita se a lista dela estiver em "*".
+  Para testar com a lista fechada, sirva a pasta:
+      python3 -m http.server 8080
+  e abra http://localhost:8080/exemplos/web/exemplo.html
+-->
+<style>
+  :root {
+    --borda: #d8dbe0; --fundo: #f6f7f9; --texto: #1b1d21; --suave: #6b7280;
+    --ok: #15803d; --erro: #b91c1c; --alerta: #b45309; --acento: #2563eb;
+    --cartao: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --borda: #2c3340; --fundo: #14171d; --texto: #e6e8ec; --suave: #9aa3af;
+      --cartao: #1c2028;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px 16px; background: var(--fundo); color: var(--texto);
+         font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .painel { max-width: 780px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  p.sub { margin: 0 0 22px; color: var(--suave); }
+  .cartao { background: var(--cartao); border: 1px solid var(--borda);
+            border-radius: 12px; padding: 18px; margin-bottom: 16px; }
+  h2 { font-size: 13px; margin: 0 0 12px; color: var(--suave);
+       text-transform: uppercase; letter-spacing: .06em; }
+  .pilula { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+            background: #9ca3af; margin-right: 8px; vertical-align: middle; }
+  .pilula.viva { background: var(--ok); }
+  .pilula.morta { background: var(--erro); }
+  #situacao { font-weight: 600; }
+  #detalhes { color: var(--suave); font-size: 13px; margin-top: 6px; }
+  textarea, select { width: 100%; padding: 10px; border: 1px solid var(--borda);
+                     border-radius: 8px; background: var(--fundo); color: var(--texto);
+                     font: 13px/1.5 ui-monospace, Consolas, monospace; }
+  textarea { min-height: 190px; resize: vertical; }
+  select { font-family: inherit; font-size: 14px; }
+  button { background: var(--acento); color: #fff; border: 0; border-radius: 8px;
+           padding: 10px 16px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  button.secundario { background: transparent; color: var(--texto);
+                      border: 1px solid var(--borda); }
+  button:hover:not(:disabled) { filter: brightness(1.08); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .linha { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+  label { font-size: 13px; color: var(--suave); display: block; margin-bottom: 4px; }
+  #resposta { margin-top: 12px; font-size: 14px; white-space: pre-wrap; }
+  .certo { color: var(--ok); } .errado { color: var(--erro); } .aviso { color: var(--alerta); }
+  pre { background: #0f172a; color: #e2e8f0; padding: 14px; border-radius: 8px;
+        overflow-x: auto; font-size: 12.5px; line-height: 1.5; margin: 0; }
+  code { background: rgba(127,127,127,.14); padding: 1px 5px; border-radius: 4px;
+         font-size: .92em; }
+</style>
+</head>
+<body>
+<div class="painel">
+
+  <h1>Ponte de Impressão — página de exemplo</h1>
+  <p class="sub">Prova que a ponte está imprimindo, e serve de ponto de partida
+     para o seu código.</p>
+
+  <div class="cartao">
+    <h2>Situação da ponte</h2>
+    <div id="situacao"><span class="pilula" id="pilula"></span>procurando…</div>
+    <div id="detalhes"></div>
+    <div class="linha">
+      <button class="secundario" id="btAtualizar">Procurar de novo</button>
+    </div>
+  </div>
+
+  <div class="cartao">
+    <h2>Imprimir</h2>
+    <label for="impressora">Impressora</label>
+    <select id="impressora"><option value="">(a escolhida na ponte)</option></select>
+
+    <label for="texto" style="margin-top:12px">Texto do cupom</label>
+    <textarea id="texto" spellcheck="false"></textarea>
+
+    <div class="linha">
+      <button id="btImprimir" disabled>Imprimir</button>
+      <button class="secundario" id="btGaveta" disabled>Abrir gaveta</button>
+      <label style="margin:0"><input type="checkbox" id="cortar" checked> cortar o papel</label>
+      <label style="margin:0">colunas
+        <select id="colunas" style="width:auto;display:inline-block">
+          <option value="32" selected>32 (58 mm)</option>
+          <option value="48">48 (80 mm)</option>
+        </select>
+      </label>
+    </div>
+    <div id="resposta"></div>
+  </div>
+
+  <div class="cartao">
+    <h2>O código que faz isto</h2>
+    <pre>&lt;script src="ponte-cliente.js"&gt;&lt;/script&gt;
+&lt;script&gt;
+const ponte = new PonteImpressao({ colunas: 32 });
+
+// 1. a ponte está no ar?
+if (await ponte.online()) {
+
+  // 2. o que esta máquina tem
+  const lista = await ponte.impressoras();
+
+  // 3. montar o cupom
+  const L = PonteImpressao;
+  const cupom = [
+    L.centro('MINHA LOJA', 32),
+    L.risco(32),
+    L.linha('Coca-Cola 2L', '25,00', 32),
+    L.linha('TOTAL', 'R$ 84,90', 32),
+  ].join('\n');
+
+  // 4. imprimir
+  const r = await ponte.imprimir(cupom, { cortar: true });
+  if (!r.ok) alert(r.erro);
+}
+&lt;/script&gt;</pre>
+    <p style="color:var(--suave);font-size:13px;margin:12px 0 0">
+      Arquivo completo em <code>exemplos/js/ponte-cliente.js</code> — copie para o
+      seu projeto, não tem dependência nenhuma.
+    </p>
+  </div>
+
+</div>
+
+<script src="../js/ponte-cliente.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var ponte = new PonteImpressao();
+  var elementos = {
+    pilula: document.getElementById('pilula'),
+    situacao: document.getElementById('situacao'),
+    detalhes: document.getElementById('detalhes'),
+    impressora: document.getElementById('impressora'),
+    texto: document.getElementById('texto'),
+    resposta: document.getElementById('resposta'),
+    btImprimir: document.getElementById('btImprimir'),
+    btGaveta: document.getElementById('btGaveta'),
+    btAtualizar: document.getElementById('btAtualizar'),
+    cortar: document.getElementById('cortar'),
+    colunas: document.getElementById('colunas')
+  };
+
+  function cupomExemplo(colunas) {
+    var L = PonteImpressao;
+    return [
+      L.centro('MINHA LOJA', colunas),
+      L.centro('Rua Exemplo, 100', colunas),
+      L.risco(colunas),
+      L.linha('Pedido', '#1234', colunas),
+      L.linha('Data', new Date().toLocaleString('pt-BR'), colunas),
+      L.risco(colunas),
+      L.linha('Coca-Cola 2L', '25,00', colunas),
+      '  2 x 12,50',
+      L.linha('Pizza Calabresa', '59,90', colunas),
+      '  1 x 59,90',
+      L.risco(colunas),
+      L.linha('TOTAL', 'R$ 84,90', colunas),
+      L.risco(colunas, '='),
+      '',
+      L.centro('Obrigado pela preferencia!', colunas),
+      ''
+    ].join('\n');
+  }
+
+  function pintarTexto() {
+    elementos.texto.value = cupomExemplo(parseInt(elementos.colunas.value, 10));
+  }
+
+  function atualizar() {
+    elementos.situacao.innerHTML = '<span class="pilula"></span>procurando…';
+    elementos.detalhes.textContent = '';
+
+    ponte.status().then(function (s) {
+      if (!s) {
+        elementos.situacao.innerHTML =
+          '<span class="pilula morta"></span>a ponte não respondeu em ' + ponte.cfg.base;
+        elementos.detalhes.innerHTML =
+          'Ela está aberta nesta máquina? Procure o ícone da ponte na barra de tarefas, ' +
+          'ou abra um terminal e rode <code>menuxy-ponte</code>.';
+        elementos.btImprimir.disabled = true;
+        elementos.btGaveta.disabled = true;
+        return;
+      }
+
+      elementos.situacao.innerHTML =
+        '<span class="pilula viva"></span>no ar — versão ' + s.versao + ' em ' + s.sistema;
+      elementos.detalhes.innerHTML =
+        'caminhos: ' + (s.backends || []).join(', ') +
+        ' &nbsp;|&nbsp; impressoras: ' + (s.impressoras || []).length +
+        (s.origens_abertas
+          ? ' <span class="aviso">— atenção: a ponte aceita QUALQUER site. ' +
+            'Feche com <code>menuxy-ponte --origens ' + location.origin + '</code></span>'
+          : '');
+
+      elementos.impressora.innerHTML = '<option value="">(a escolhida na ponte)</option>';
+      (s.detalhes || []).forEach(function (p) {
+        var opcao = document.createElement('option');
+        opcao.value = p.nome || p.id;
+        opcao.textContent = (p.rotulo || p.nome) + '  [' + p.tipo + ']';
+        elementos.impressora.appendChild(opcao);
+      });
+
+      elementos.btImprimir.disabled = false;
+      elementos.btGaveta.disabled = false;
+    });
+  }
+
+  function responder(resultado) {
+    if (resultado.ok) {
+      elementos.resposta.className = 'certo';
+      elementos.resposta.textContent =
+        '✓ enviado para ' + resultado.impressora + ' (' + resultado.bytes + ' bytes)';
+    } else {
+      elementos.resposta.className = 'errado';
+      elementos.resposta.textContent = '✗ ' + resultado.erro;
+    }
+  }
+
+  elementos.btImprimir.addEventListener('click', function () {
+    elementos.btImprimir.disabled = true;
+    elementos.resposta.className = '';
+    elementos.resposta.textContent = 'enviando…';
+    ponte.imprimir(elementos.texto.value, {
+      cortar: elementos.cortar.checked,
+      impressora: elementos.impressora.value,
+      colunas: parseInt(elementos.colunas.value, 10)
+    }).then(function (r) {
+      responder(r);
+      elementos.btImprimir.disabled = false;
+    });
+  });
+
+  elementos.btGaveta.addEventListener('click', function () {
+    ponte.gaveta({ impressora: elementos.impressora.value }).then(responder);
+  });
+
+  elementos.btAtualizar.addEventListener('click', atualizar);
+  elementos.colunas.addEventListener('change', pintarTexto);
+
+  pintarTexto();
+  atualizar();
+})();
+</script>
+</body>
+</html>

@@ -1,9 +1,32 @@
-# Obrigatório: acesso USB de baixo nível
+# ============================================================================
+#  A ponte NÃO PRECISA de nada disto para funcionar.
+#
+#  O caminho `sistema:` — impressora instalada no spooler do Windows ou na fila
+#  do CUPS, que é o que a maioria dos balcões usa — depende só da biblioteca
+#  padrão do Python 3.8+. Cada opcional abaixo acrescenta um caminho; o que
+#  faltar simplesmente some do catálogo, sem derrubar o resto.
+#
+#  Confira o que a sua máquina tem:   menuxy-ponte --diagnostico
+# ============================================================================
+
+# --- Caminho `usb:` — impressora plugada SEM driver -------------------------
+# Sem ele, USB direta não é oferecida.
 pyusb>=1.2.1
 
-# Opcional: API de alto nível ESC/POS (--usar-escpos)
-python-escpos>=3.0
+# --- Caminho `serial:` — impressora serial ou conversor USB-serial ----------
+pyserial>=3.5
 
-# Opcional (Windows): traz a libusb-1.0.dll embutida no pacote,
-# evitando ter que baixar e posicionar a DLL manualmente.
-# libusb-package>=1.0.26
+# --- Windows: a libusb que o pyusb precisa ----------------------------------
+# Dispensa caçar e posicionar a DLL à mão. Não existe wheel para win-arm64 —
+# e é por isso que, no Windows ARM, o caminho certo é o `usbprint:`, que não
+# depende de libusb nenhuma.
+libusb-package>=1.0.26 ; sys_platform == "win32"
+
+# --- A janela ---------------------------------------------------------------
+# tkinter NÃO se instala por pip. Vem junto com o Python no Windows e no macOS;
+# no Linux é um pacote do sistema:
+#     sudo apt install python3-tk
+# Faltando, a ponte roda no terminal e imprime normalmente.
+
+# --- Só para gerar os pacotes (não é preciso no balcão) ---------------------
+# pyinstaller>=6.0

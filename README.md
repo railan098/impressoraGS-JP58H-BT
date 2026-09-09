@@ -1,690 +1,252 @@
-# Impressora Térmica 58mm (SMX-JP58H / POS-58) — ESC/POS direto via USB
+<div align="center">
 
-Solução que **ignora completamente o driver do fabricante**, o spooler do Windows e o
-CUPS, falando ESC/POS diretamente no endpoint USB bulk-OUT. É por isso que funciona
-em **Windows 11 ARM (Snapdragon 7c Gen 2)**, onde o driver oficial não existe.
+<img src="ponte_menuxy/recursos/icone-128.png" width="96" alt="">
 
-> ### ✅ Testado em hardware real
-> Este código foi executado contra a impressora física durante o desenvolvimento:
-> ```
-> [OK] Impressora encontrada pela classe USB 7 (interface 0): 0x0416:0x5011 — POS-58 Printer
-> [OK] Driver do kernel (usblp) desanexado da interface 0.
-> [OK] Endpoint OUT: 0x01 (pacote de 64 bytes)
-> [OK] 412 bytes enviados à impressora.
-> ```
+# Ponte de Impressão Menuxy
+
+**Deixa um sistema web imprimir na impressora térmica do balcão.**
+Windows e Linux, um código só, cinco caminhos até o papel.
+
+`.exe` para Windows &nbsp;·&nbsp; `.deb` para Linux &nbsp;·&nbsp; sem dependência obrigatória
+
+</div>
 
 ---
 
-## 📌 Os IDs reais da sua impressora
+## O problema
 
-Descobertos lendo os descritores USB do seu equipamento:
+Nenhum navegador consegue falar com uma impressora térmica:
 
-| Campo | Valor | Observação |
+* a API **WebUSB bloqueia dispositivos de classe 7** (impressora), por decisão
+  de segurança dos navegadores;
+* no Windows, o `usbprint.sys` já reivindicou o aparelho;
+* `window.print()` manda a página **renderizada**, não ESC/POS — a térmica não
+  entende;
+* numa fila **raw** do CUPS é pior: sem filtro, o PDF do navegador vai cru para
+  a bobina e saem metros de lixo.
+
+E o seu servidor não resolve: ele não alcança a USB de um balcão a 500 km dele.
+
+## A solução
+
+Um programa que roda **na máquina do balcão** e expõe HTTP local:
+
+```
+navegador --HTTP--> ponte (127.0.0.1:9100) --> impressora
+```
+
+```js
+await fetch('http://127.0.0.1:9100/imprimir', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ texto: 'MEU CUPOM\n', cortar: true })
+});
+```
+
+---
+
+## Começar em três minutos
+
+**Linux**
+
+```bash
+./empacotar/linux/gerar_deb.sh
+sudo apt install ./dist/menuxy-ponte_3.0.0_all.deb
+menuxy-ponte --origens https://menuxy.alvesprotect.app.br
+menuxy-ponte --testar
+```
+
+**Windows**
+
+```
+empacotar\windows\gerar_exe.bat     (uma vez, na sua máquina)
+```
+
+Entregue `dist\PonteMenuxy.exe` ao cliente. Duplo clique, e a janela abre.
+
+**A partir do código, em qualquer sistema**
+
+```bash
+python3 -m ponte_menuxy --listar
+python3 -m ponte_menuxy
+```
+
+Instalação detalhada: [`docs/INSTALACAO.md`](docs/INSTALACAO.md).
+
+---
+
+## O aplicativo
+
+Uma janela com quatro abas, para o operador não precisar de terminal nem de
+editor de texto:
+
+| Aba | O que resolve |
+|---|---|
+| **Situação** | a ponte está no ar? quantos cupons saíram? quem pode mandar imprimir? |
+| **Impressoras** | escolher a impressora, imprimir teste, abrir a gaveta, cadastrar impressora de rede |
+| **Configuração** | porta, origens permitidas, acentos, largura do papel, corte — e **iniciar junto com o computador** |
+| **Registro** | o que passou por aqui, com hora |
+
+Mais o **atalho na área de trabalho e no menu**, criado por um botão — fora da
+pasta do projeto, que é de onde o operador vai abrir todo dia.
+
+Sem `tkinter` a janela não abre e a ponte **continua imprimindo**, no terminal.
+
+---
+
+## Cinco caminhos até o papel
+
+Uma impressora chega ao computador de formas muito diferentes, e uma ponte que
+cobre só uma delas deixa metade dos clientes de fora.
+
+| Identificador | Quando é o caminho certo | Precisa de |
 |---|---|---|
-| `idVendor` | **`0x0416`** | Winbond/Nuvoton (chip **YICHIP3121**) |
-| `idProduct` | **`0x5011`** | anunciado como "Virtual Com Port" |
-| `Product` | `POS-58 Printer` | |
-| `bDeviceClass` | **`0`** | ⚠️ *não* é 7 — veja abaixo |
-| `bInterfaceClass` | **`7`** (Printer) | a classe fica na **interface** |
-| `bInterfaceProtocol` | `2` | bidirecional |
-| Endpoint **OUT** | **`0x01`** | Bulk, 64 bytes |
-| Endpoint **IN** | `0x81` | Bulk, 64 bytes |
+| `sistema:<nome>` | a impressora está **instalada** (spooler do Windows / fila do CUPS). Térmica, laser, jato, USB ou de rede | nada |
+| `usb:VID:PID` | impressora **plugada sem driver** — a genérica que o Windows não reconhece | `pyusb` |
+| `usbprint:VID:PID` | Windows, **inclusive ARM**: usa o driver que o próprio Windows anexou, sem Zadig | nada |
+| `rede:host:porta` | impressora com IP, protocolo RAW 9100 | nada |
+| `serial:porta:vel` | impressora serial ou conversor USB-serial | `pyserial` |
 
-### ⚠️ Correção técnica importante
+O prefixo não é enfeite: uma `Termica58` instalada e uma `Termica58` na USB são
+coisas diferentes, e sem ele o trabalho poderia sair pelo caminho errado.
 
-Você sugeriu filtrar por `bDeviceClass == 7`. **Isso não funciona nesta impressora** —
-e nem na maioria das 58mm genéricas. Elas declaram `bDeviceClass = 0x00`
-("classe definida na interface") e colocam a classe 7 na *interface*:
+**O caminho `sistema:` não tem dependência nenhuma além da biblioteca padrão do
+Python** — e é o que a maioria dos balcões usa. Os opcionais que faltarem
+somem do catálogo sem derrubar o resto.
 
-```
-bDeviceClass         0  [unknown]      <-- seria descartada pelo filtro
-  bInterfaceClass    7  Printer        <-- é aqui que está
-```
-
-O script faz a varredura **interface a interface** (`intf.bInterfaceClass == 7`),
-que é o que realmente encontra o equipamento.
-
-### ⚠️ Segunda correção: o comando de corte
-
-O comando citado, `\x1D\xV\x00`, **não é válido** — `\xV` não é um escape hexadecimal
-em Python (`\x` exige dois dígitos hex, e `V` não é dígito). Isso causaria
-`SyntaxError` na importação. Os comandos corretos são:
-
-| Comando | Bytes | Significado |
-|---|---|---|
-| `GS V 0` | `\x1D\x56\x00` | corte total |
-| `GS V 1` | `\x1D\x56\x01` | corte parcial |
-| `GS V B n` | `\x1D\x56\x42\x40` | avança `n` pontos e corta ← **usado no script** |
-
-O script usa a terceira forma porque ela empurra o texto para fora da cabeça térmica
-antes de cortar. **Se a sua SMX-JP58H não tiver guilhotina** (a maioria das 58mm de
-serrilha manual não tem), o comando é simplesmente ignorado pelo firmware — inofensivo.
+Detalhes e lista de modelos: [`docs/COMPATIBILIDADE.md`](docs/COMPATIBILIDADE.md).
 
 ---
 
-## 1. Arquivos
+## Contrato HTTP
 
-| Arquivo | Função |
+```
+GET  /status        situação, versão, impressoras
+GET  /impressoras   só as impressoras
+GET  /saude         { ok, versao } — não toca na impressora
+POST /imprimir      { texto, cortar?, impressora?, colunas? }
+POST /raw           { base64, impressora? }        ESC/POS já montado
+POST /gaveta        { impressora? }
+```
+
+> **HTTP 200 sozinho não prova que imprimiu.** Confira `ok === true` no corpo:
+> a ponte só o marca depois que o spooler, a USB ou a rede aceitaram os bytes.
+
+Contrato completo: [`docs/API.md`](docs/API.md).
+
+---
+
+## Segurança
+
+| Medida | O que impede |
 |---|---|
-| `imprime_termica.py` | o programa |
-| **`instalar.bat`** | **instalador automático do Windows — duplo clique** |
-| `imprimir.bat` | menu de uso no Windows |
-| `gerar_exe.bat` | gera o `.exe` standalone |
-| **`testar.bat`** | **roda o diagnóstico completo (37 verificações)** |
-| `autoteste.py` | a bateria de testes em si |
-| `instalar.sh` | instalador automático do Linux |
-| `imprimir.sh` | atalho de uso no Linux |
-| `requirements.txt` | dependências |
-| `99-impressora-termica.rules` | regra udev (Linux) |
+| Escuta **só em `127.0.0.1`** | Nenhuma máquina da rede alcança a porta. Não é firewall: o socket não existe fora do loopback. |
+| **Lista de origens** | Sem ela, qualquer site aberto no navegador do operador manda imprimir. |
+| **Teto por minuto** (60) | Um site hostil, ou um laço com defeito no sistema, despeja a bobina inteira. |
+| **Teto de corpo** (512 KB) | Corpo gigante como negação de serviço. |
+| Nome conferido na **lista real** | Erro de digitação vira mensagem clara; nome forjado não chega a lugar nenhum. |
+| **Nenhum shell** | `subprocess` com lista de argumentos, Win32 por `ctypes`. `Termica; rm -rf /` é só um nome que não existe. |
+| **Nenhum acesso a dado** | Sem banco, sem leitura de arquivo, sem rota que devolva informação de venda. |
 
----
-
-## 1.1 🚀 Instalação rápida (o caminho curto)
-
-### Windows
-
-> ### ⚠️ Onde clonar — leia antes
-> **Nunca clone dentro de `C:\Windows\System32`, `SysWOW64` ou `Program Files`.**
->
-> Isso acontece sem querer: o "cmd como administrador" **sempre abre em
-> `C:\Windows\System32`**, e um `git clone` ali joga o projeto na pasta de sistema.
-> Os sintomas são criar `.venv` exigindo admin, o Defender bloqueando arquivos, e o
-> risco de um comando de limpeza mal digitado quebrar o Windows.
->
-> **Clone aqui:**
-> ```powershell
-> cd $env:USERPROFILE\Documents
-> git clone https://github.com/railan098/impressoraGS-JP58H-BT.git
-> cd impressoraGS-JP58H-BT
-> ```
-> O `instalar.bat` detecta pasta de sistema e se recusa a continuar, oferecendo
-> copiar o projeto para o lugar certo.
-
-```
-1. Clone o projeto em Documentos (NÃO em System32)
-2. DUPLO CLIQUE em  instalar.bat
-3. Siga as instruções na tela
-4. Rode o Zadig (o instalador te avisa se for preciso)
-5. DUPLO CLIQUE em  imprimir.bat
-```
-
-O `instalar.bat` faz tudo sozinho: confere o Python e a arquitetura, cria o
-ambiente virtual, instala as bibliotecas, resolve a libusb (inclusive baixando a
-DLL ARM64 do GitHub se você estiver no Python ARM64), testa o backend e já procura
-a impressora.
-
-### Linux
+**O limite, dito sem rodeio:** com a lista de origens aberta (`["*"]`), qualquer
+site que o operador visitar consegue gastar a sua bobina. Ler, não consegue —
+não há o que ler. Feche assim que souber o endereço:
 
 ```bash
-chmod +x instalar.sh imprimir.sh
-./instalar.sh
+menuxy-ponte --origens https://menuxy.alvesprotect.app.br
 ```
 
-As seções abaixo explicam o que os instaladores fazem por baixo, e servem para
-quando algo dá errado.
+O resto, inclusive o que ela **não** protege:
+[`docs/SEGURANCA.md`](docs/SEGURANCA.md).
 
 ---
 
-## 2. 🪟 Windows 11 ARM (Snapdragon 7c Gen 2)
+## Verificação
 
-### 2.1 — ⚠️ LEIA ANTES: qual Python instalar
-
-Este é **o ponto que mais trava** nesse setup, e a resposta não é óbvia:
-
-> **Recomendação: instale o Python x64, não o ARM64.**
-
-Motivo: o PyUSB precisa da biblioteca nativa `libusb-1.0.dll`, e a arquitetura da DLL
-precisa bater com a do interpretador. Praticamente **não existem wheels prontas de
-libusb para `win-arm64`**, enquanto para x64 elas são abundantes. O Windows 11 ARM
-executa binários x64 sob emulação de forma transparente, e para enviar 400 bytes a uma
-impressora o custo da emulação é irrelevante.
-
-| Rota | Python | libusb | Dificuldade |
-|---|---|---|---|
-| **A (recomendada)** | x64 (emulado) | `pip install libusb-package` | fácil |
-| B (nativa) | ARM64 | DLL ARM64 extraída à mão do release oficial | trabalhosa |
-
-**Rota A — passo a passo:**
-
-1. Vá em <https://www.python.org/downloads/windows/>
-2. Baixe **"Windows installer (64-bit)"** — o rótulo é `amd64`, **não** o `arm64`.
-   Python 3.8+ serve; 3.11 ou 3.12 é a escolha segura.
-3. Na primeira tela do instalador, **marque `Add python.exe to PATH`**.
-4. Conclua a instalação e confirme no PowerShell:
-   ```powershell
-   python --version
-   ```
-
-> **Python 3.14 funciona.** Verifiquei a disponibilidade de wheels no PyPI:
-> `pyusb` e `python-escpos` são Python puro (rodam em qualquer versão/arquitetura),
-> e o `Pillow` (dependência do escpos) já publica wheels `cp314` para
-> `win_amd64` **e** `win_arm64`. O único pacote sem versão ARM64 é o
-> `libusb-package` — que é exatamente por isso que a rota x64 é a recomendada.
-> Se você insistir no ARM64, o `instalar.bat` baixa a DLL certa automaticamente.
-
-**Rota B (só se você fizer questão do ARM64 nativo):** instale o Python ARM64, baixe
-`libusb-1.0.XX.7z` em <https://github.com/libusb/libusb/releases>, extraia
-`VS2025\ARM64\dll\libusb-1.0.dll` e coloque na mesma pasta do script (ou aponte com
-`--libusb C:\caminho\libusb-1.0.dll`).
-
-### 2.2 — Instalar as dependências
-
-```powershell
-python -m pip install --upgrade pip
-python -m pip install pyusb python-escpos libusb-package
+```bash
+python3 testes/verificar_ponte.py
 ```
 
-> `libusb-package` é o que dispensa você de caçar a DLL manualmente. Se preferir não
-> usá-lo, o script aceita `--libusb <caminho da dll>`.
+98 checagens: montagem ESC/POS, saneamento da configuração, contrato dos cinco
+backends, resolução de identificadores, rotas, CORS, validação de entrada,
+nomes hostis, lista de origens, teto por minuto e superfície de ataque.
 
-### 2.3 — 🔑 PASSO CRÍTICO: trocar o driver com o Zadig
+**Não gasta papel** — mira uma impressora que não existe e confere a recusa.
+Para imprimir de verdade, um cupom só:
 
-O Windows atribui à impressora o driver `usbprint.sys`, que é **exclusivo** e bloqueia
-o libusb. É preciso substituí-lo pelo **WinUSB** genérico.
-
-**Baixe o Zadig em <https://zadig.akeo.ie/>** (é portátil, não instala nada).
-O `.exe` é x86/x64 e roda sob emulação no Windows ARM sem problemas.
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  PASSO 1  Conecte a impressora e LIGUE ela (o botão de energia).     │
-│           Só o cabo USB não basta — o USB alimenta o chip, mas a     │
-│           impressora precisa estar ligada para enumerar direito.     │
-├─────────────────────────────────────────────────────────────────────┤
-│  PASSO 2  Clique com o botão direito em zadig.exe                    │
-│           → "Executar como administrador"                            │
-├─────────────────────────────────────────────────────────────────────┤
-│  PASSO 3  No menu superior:  Options  →  ☑ List All Devices          │
-│           ▲ SEM ISSO A IMPRESSORA NÃO APARECE NA LISTA.              │
-├─────────────────────────────────────────────────────────────────────┤
-│  PASSO 4  Na caixa suspensa, escolha a sua impressora.               │
-│           Procure por:  "POS-58 Printer"  ou  "POS58"  ou            │
-│                         "Printer"  ou  "USB Printing Support"        │
-│           ✔ CONFIRME pelo USB ID logo abaixo:  0416  5011            │
-└─────────────────────────────────────────────────────────────────────┘
-
-   Assim deve ficar a janela do Zadig:
-
-   ┌───────────────────────────── Zadig ─────────────────────────────┐
-   │ Device  Options  Help                                           │
-   │                                                                 │
-   │  ┌───────────────────────────────────────────────┐              │
-   │  │ POS-58 Printer                            ▼   │  <- PASSO 4  │
-   │  └───────────────────────────────────────────────┘              │
-   │                                                                 │
-   │   Driver     usbprint (v10.0.x)   ➜   WinUSB (v6.1.x)           │
-   │              ▲ o que está lá          ▲ PASSO 5: use as setinhas│
-   │                                         ◄ ► até aparecer WinUSB │
-   │                                                                 │
-   │   USB ID     0416   5011      <- confira se é este!             │
-   │   WCID²      ✗                                                  │
-   │                                                                 │
-   │        ┌──────────────────────────────────┐                     │
-   │        │      Replace Driver              │  <- PASSO 6: clique │
-   │        └──────────────────────────────────┘                     │
-   └─────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────────┐
-│  PASSO 5  No campo da DIREITA, use as setas ◄ ► até selecionar      │
-│           **WinUSB**  (NÃO escolha libusb-win32 nem libusbK).       │
-├─────────────────────────────────────────────────────────────────────┤
-│  PASSO 6  Clique em "Replace Driver" (ou "Install Driver").         │
-│           Demora de 10 a 60 segundos. NÃO cancele nem desconecte.   │
-│           Aceite o aviso do Windows sobre driver não assinado.      │
-├─────────────────────────────────────────────────────────────────────┤
-│  PASSO 7  Ao ver "The driver was installed successfully", feche.    │
-│           Desconecte e reconecte o cabo USB.                        │
-└─────────────────────────────────────────────────────────────────────┘
+```bash
+python3 testes/verificar_ponte.py --com-papel sistema:Termica58
 ```
 
-**Como confirmar que deu certo:** abra o Gerenciador de Dispositivos
-(`Win+X` → Gerenciador de Dispositivos). A impressora deve ter **saído** de
-"Filas de impressão" e aparecido em **"Dispositivos USB universais"** como
-`POS-58 Printer`.
+---
 
-> **⚠️ Efeito colateral esperado:** depois do Zadig, a impressora **deixa de aparecer**
-> em "Impressoras e Scanners" do Windows. Isso é normal e é justamente o objetivo — ela
-> passa a ser controlada só por este script. Para reverter: Gerenciador de Dispositivos
-> → botão direito na impressora → Desinstalar dispositivo → marque "tentar remover o
-> driver" → reconecte o cabo.
+## Estrutura
 
-### 2.4 — Executar
+```
+ponte_menuxy/        o aplicativo
+  config.py          onde a configuração mora, e o saneamento dela
+  escpos.py          texto -> bytes que a impressora entende
+  backends/          os cinco caminhos até o papel
+  catalogo.py        junta os cinco; resolve identificadores
+  servidor.py        o HTTP e as travas
+  inicializacao.py   iniciar com o sistema; atalhos
+  janela.py          a interface (opcional)
+  cli.py             a linha de comando
 
-```powershell
-python imprime_termica.py --listar        # confirme que ela aparece
-python imprime_termica.py                 # imprime o cupom de teste
-python imprime_termica.py --texto "Meu recibo"
-python imprime_termica.py --vid 0x0416 --pid 0x5011
+exemplos/            código para copiar em projetos novos
+  js/ponte-cliente.js      cliente JavaScript, sem dependência
+  php/PonteImpressao.php   monta o cupom no servidor
+  python/cliente.py        cliente para o que não é web
+  web/exemplo.html         página de diagnóstico
+  MIGRACAO-MENUXY.md       migração da ponte v2, com os diff prontos
+
+empacotar/           .exe, .deb e binário único
+docs/                a documentação
+testes/              o verificador
+ferramenta_cli/      a ferramenta de baixo nível e a engenharia reversa da GS-JP58H
 ```
 
-### 2.5 — Problemas comuns no Windows
+---
 
-| Sintoma | Causa / solução |
+## Documentação
+
+| | |
 |---|---|
-| `NoBackendError` | libusb ausente → `pip install libusb-package`, ou `--libusb C:\...\libusb-1.0.dll` com a **mesma arquitetura do Python** |
-| `Access denied (errno 13)` | Zadig não foi aplicado, ou foi aplicado no dispositivo errado. Refaça com `List All Devices` marcado |
-| Não aparece no `--listar` | Impressora desligada, ou ainda em `usbprint.sys` |
-| DLL "não é um aplicativo Win32 válido" | Arquiteturas trocadas: Python ARM64 com DLL x64 (ou vice-versa) |
-| Erro de timeout | Sem papel, tampa aberta, ou impressora desligada |
+| [INSTALACAO.md](docs/INSTALACAO.md) | instalar em cada sistema |
+| [CONFIGURACAO.md](docs/CONFIGURACAO.md) | todos os campos, e os quatro ajustes que resolvem quase tudo |
+| [API.md](docs/API.md) | o contrato HTTP |
+| [ARQUITETURA.md](docs/ARQUITETURA.md) | como é por dentro, e por que foi assim |
+| [COMPATIBILIDADE.md](docs/COMPATIBILIDADE.md) | sistemas, impressoras e o caso do Windows ARM |
+| [SEGURANCA.md](docs/SEGURANCA.md) | as travas, e o que elas não protegem |
+| [EMPACOTAMENTO.md](docs/EMPACOTAMENTO.md) | gerar o `.exe` e o `.deb` |
+| [SOLUCAO-DE-PROBLEMAS.md](docs/SOLUCAO-DE-PROBLEMAS.md) | quando o cupom não sai |
+| [exemplos/README.md](exemplos/README.md) | ligar um projeto novo à ponte |
+| [ferramenta_cli/README.md](ferramenta_cli/README.md) | a engenharia reversa da GS-JP58H |
 
 ---
 
-## 3. 🐧 Linux (Debian / Ubuntu, amd64 e arm64)
+## A ferramenta de linha de comando
 
-### 3.1 — Dependências do sistema
-
-```bash
-sudo apt update
-sudo apt install -y python3 python3-pip python3-venv libusb-1.0-0 libusb-1.0-0-dev
-```
-
-### 3.2 — Dependências Python
-
-Distros recentes (Ubuntu 23.04+, Debian 12+) bloqueiam `pip install` global
-(PEP 668). Use um ambiente virtual:
+`ferramenta_cli/imprime_termica.py` continua no projeto. Ela é a ferramenta de
+diagnóstico de baixo nível e carrega o trabalho de engenharia reversa da
+GS-JP58H — descoberta de endpoint, detach do driver do kernel, páginas de
+código, tradução dos erros de libusb. É com ela que se investiga por que uma
+impressora nova não é reconhecida:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install pyusb python-escpos
+python3 ferramenta_cli/imprime_termica.py --listar
 ```
 
-<details>
-<summary>Alternativa sem venv (pacotes do sistema)</summary>
-
-```bash
-sudo apt install -y python3-usb python3-escpos
-```
-</details>
-
-### 3.3 — 🔑 Regra UDEV (acesso sem `sudo`)
-
-Sem isso você recebe `USBError: [Errno 13] Access denied`.
-
-```bash
-sudo tee /etc/udev/rules.d/99-impressora-termica.rules > /dev/null <<'EOF'
-# POS-58 / SMX-JP58H (Winbond 0416:5011)
-SUBSYSTEM=="usb", ATTRS{idVendor}=="0416", ATTRS{idProduct}=="5011", MODE="0666", GROUP="lp", TAG+="uaccess"
-
-# Regra genérica: qualquer dispositivo com interface de classe 7 (Printer)
-SUBSYSTEM=="usb", ENV{ID_USB_INTERFACES}=="*:07*:*", MODE="0666", GROUP="lp", TAG+="uaccess"
-EOF
-
-sudo udevadm control --reload-rules
-sudo udevadm trigger
-```
-
-> O arquivo `99-impressora-termica.rules` deste repositório já traz essas regras mais
-> as de outros clones comuns — se preferir: `sudo cp 99-impressora-termica.rules /etc/udev/rules.d/`
-
-**Troque o VID/PID se a sua for diferente.** Descubra com `lsusb` ou
-`python3 imprime_termica.py --listar`.
-
-### 3.4 — Adicionar o usuário ao grupo `lp`
-
-```bash
-sudo usermod -aG lp $USER
-```
-
-⚠️ **É obrigatório fazer logout/login** (ou reiniciar) para o grupo valer.
-Verifique com:
-
-```bash
-groups | grep lp        # deve listar 'lp'
-id -nG                  # confirmação alternativa
-```
-
-Truque para testar sem deslogar (vale só para o shell atual):
-
-```bash
-newgrp lp
-```
-
-### 3.5 — Reconecte o cabo
-
-As regras udev só se aplicam quando o dispositivo é enumerado. **Desconecte e
-reconecte o cabo USB** depois de instalar a regra.
-
-Verificação das permissões:
-
-```bash
-lsusb | grep -i pos            # localize bus/device
-ls -l /dev/bus/usb/001/00X     # deve mostrar crw-rw-rw- ... lp
-```
-
-### 3.6 — Sobre o driver `usblp` do kernel
-
-O Linux anexa automaticamente o módulo `usblp` à impressora, criando `/dev/usb/lp0`.
-Isso normalmente impede o libusb de reivindicar a interface.
-
-**O script já resolve isso sozinho** — ele chama `detach_kernel_driver()` antes de
-imprimir e devolve a impressora ao kernel no final. Foi exatamente o que aconteceu no
-teste real:
-
-```
-[OK] Driver do kernel (usblp) desanexado da interface 0.
-```
-
-Se ainda assim aparecer `Resource busy (errno 16)`, o CUPS é o culpado:
-
-```bash
-sudo systemctl stop cups cups-browsed
-# ou, para soltar de vez:
-sudo modprobe -r usblp
-```
-
-### 3.7 — Executar
-
-```bash
-python3 imprime_termica.py --listar
-python3 imprime_termica.py
-python3 imprime_termica.py --texto "Comanda 42 — Mesa 7"
-python3 imprime_termica.py --arquivo cupom.txt
-python3 imprime_termica.py --usar-escpos
-python3 imprime_termica.py --abrir-gaveta          # pulso RJ11
-```
-
-### 3.8 — Problemas comuns no Linux
-
-| Sintoma | Solução |
-|---|---|
-| `Access denied (errno 13)` | Regra udev não aplicada, ou cabo não foi reconectado, ou falta logout após `usermod` |
-| `Resource busy (errno 16)` | `sudo systemctl stop cups` e/ou `sudo modprobe -r usblp` |
-| `NoBackendError` | `sudo apt install libusb-1.0-0` |
-| `externally-managed-environment` | Use o venv da seção 3.2 |
-| Acentos saem errados | Tente `--codepage cp860` (Portuguese) ou `--codepage cp437` |
+O backend `usb:` da ponte herdou essas decisões; elas custaram caro para
+descobrir e não devem ser refeitas por suposição.
 
 ---
 
-## 4. 📦 Gerar executáveis standalone (PyInstaller)
+<div align="center">
+<sub>
 
-O usuário final não precisa instalar Python nem as bibliotecas.
+Feito para o [Menuxy](https://menuxy.alvesprotect.app.br) — e para qualquer
+projeto que precise imprimir. Veja [`exemplos/`](exemplos/).
 
-```bash
-pip install pyinstaller
-```
-
-### Windows (`.exe`)
-
-```powershell
-pyinstaller --onefile --console --name imprime_termica ^
-            --collect-all usb ^
-            --collect-all libusb_package ^
-            imprime_termica.py
-```
-
-Saída: `dist\imprime_termica.exe`
-
-> **⚠️ PyInstaller não faz cross-compilation.** O `.exe` precisa ser gerado **na
-> própria máquina Windows ARM** para virar um binário ARM64 — gerar num PC x64 produz
-> um `.exe` x64 (que ainda assim roda no ARM sob emulação, e é a rota mais prática
-> dado o cenário de libusb descrito na seção 2.1).
->
-> **⚠️ O Zadig continua sendo obrigatório** na máquina de destino. O `.exe` empacota o
-> Python e as bibliotecas, mas não o driver WinUSB.
-
-Se não usar `libusb-package`, copie a `libusb-1.0.dll` para junto do `.exe`, ou embuta:
-
-```powershell
-pyinstaller --onefile --console --add-binary "libusb-1.0.dll;." imprime_termica.py
-```
-
-### Linux (binário ELF)
-
-```bash
-pyinstaller --onefile --console --name imprime_termica \
-            --collect-all usb \
-            imprime_termica.py
-```
-
-Saída: `dist/imprime_termica`
-
-```bash
-chmod +x dist/imprime_termica
-./dist/imprime_termica --listar
-```
-
-> **⚠️ Compile na mesma arquitetura do alvo.** Um build feito em amd64 **não roda** em
-> arm64 (Raspberry Pi etc.) — gere o binário arm64 numa máquina arm64.
->
-> Para máxima compatibilidade entre distros, compile na distro **mais antiga** que
-> pretende suportar (a glibc é retrocompatível para a frente, não para trás).
-
-### Comando mínimo (o que você pediu)
-
-```bash
-pyinstaller --onefile --console imprime_termica.py
-```
-
-Funciona nos dois sistemas. As flags `--collect-all` acima são recomendadas porque o
-PyUSB carrega o backend dinamicamente e o PyInstaller às vezes não detecta essa
-dependência sozinho.
-
----
-
-## 5. Referência da linha de comando
-
-| Flag | Efeito |
-|---|---|
-| *(nenhuma)* | detecta e imprime o cupom de teste |
-| `--listar` | lista todos os dispositivos USB com VID/PID |
-| `--vid 0x0416 --pid 0x5011` | força um dispositivo específico |
-| `--texto "..."` | imprime um texto próprio |
-| `--arquivo cupom.txt` | imprime o conteúdo de um arquivo UTF-8 |
-| `--codepage cp850\|cp860\|cp437\|cp1252` | página de código dos acentos |
-| `--sem-corte` | não envia o comando de corte |
-| `--usar-escpos` | usa a biblioteca python-escpos |
-| `--libusb <caminho>` | aponta a libusb manualmente |
-| `--abrir-gaveta` | dispara o pulso da gaveta de dinheiro (RJ11) |
-
-Códigos de saída: `0` sucesso · `2` pyusb ausente · `3` sem backend libusb ·
-`4` erro de arquivo · `5` erro USB · `6` impressora não encontrada.
-
----
-
-## 6. Usando como biblioteca
-
-```python
-from imprime_termica import montar_cupom, imprimir_pyusb, ESCPOS
-
-# Cupom montado à mão
-dados = (
-    ESCPOS.INIT
-    + ESCPOS.codepage(2)                  # CP850, acentos PT-BR
-    + ESCPOS.ALINHA_CENTRO
-    + ESCPOS.TAM_DUPLO
-    + "PADARIA DO ZE\n".encode("cp850")
-    + ESCPOS.TAM_NORMAL
-    + ESCPOS.ALINHA_ESQ
-    + "Pao frances .... R$ 12,00\n".encode("cp850")
-    + "Cafe ........... R$  8,50\n".encode("cp850")
-    + ESCPOS.avanca(4)
-    + ESCPOS.corte_com_avanco()
-)
-imprimir_pyusb(dados)
-
-# Ou o atalho:
-imprimir_pyusb(montar_cupom("Comanda 42"))
-```
-
----
-
-## 7. 🐙 Fluxo de trabalho com o GitHub
-
-Repositório: <https://github.com/railan098/impressoraGS-JP58H-BT>
-
-### 7.1 — Enviar as alterações (do Linux, onde você desenvolve)
-
-```bash
-git add -A
-git commit -m "Descreva o que mudou"
-git push origin main
-```
-
-### 7.2 — Baixar no Windows ARM (a máquina da impressora)
-
-Abra o **Git Bash** ou o **PowerShell** na pasta onde quer o projeto:
-
-```bash
-git clone https://github.com/railan098/impressoraGS-JP58H-BT.git
-cd impressoraGS-JP58H-BT
-```
-
-Depois é só dar **duplo clique em `instalar.bat`**.
-
-### 7.3 — Atualizar o Windows depois de mudar algo no Linux
-
-No Windows, dentro da pasta do projeto:
-
-```bash
-git pull
-```
-
-Pronto — o `imprime_termica.py` atualizado já está lá. Não precisa reinstalar nada,
-o `.venv` continua valendo. Só rode `imprimir.bat` de novo.
-
-> Esse é o ciclo que você queria: **edita no Linux → `git push` → `git pull` no
-> Windows → testa na impressora.** Sem pendrive, sem anexo de e-mail.
-
-### 7.4 — Se você editar direto no Windows
-
-```bash
-git add -A
-git commit -m "Ajuste feito no Windows"
-git push
-```
-
-E no Linux, `git pull` para receber de volta.
-
-### 7.5 — Autenticação (o GitHub não aceita mais senha)
-
-Se o `git push` pedir usuário e senha e recusar sua senha normal, é porque o GitHub
-exige **token**, não senha:
-
-1. <https://github.com/settings/tokens> → **Generate new token (classic)**
-2. Marque o escopo **`repo`**
-3. Copie o token (ele só aparece uma vez)
-4. No `git push`, use o **token no lugar da senha**
-
-Para não digitar toda vez:
-
-```bash
-# Linux
-git config --global credential.helper store
-
-# Windows (já vem com o Git for Windows)
-git config --global credential.helper manager
-```
-
-### 7.6 — ⚠️ Sobre o binário de 21 MB no histórico
-
-O primeiro commit incluiu `dist/imprime_termica` (o executável Linux, 21 MB). Já
-adicionei `dist/` ao `.gitignore`, então **novos commits não levam mais binários** —
-mas o arquivo continua no histórico do repositório, deixando o `git clone` pesado.
-
-Como o repositório é novo e só você o usa, dá para limpar reescrevendo o histórico:
-
-```bash
-git checkout --orphan limpo     # cria um branch sem histórico
-git add -A
-git commit -m "Impressora térmica 58mm ESC/POS via USB"
-git branch -D main
-git branch -m main
-git push -f origin main         # sobrescreve o histórico remoto
-```
-
-> **Só faça isso se ninguém mais tiver clonado o repositório** — o `push -f`
-> reescreve o histórico para todo mundo. Se preferir não mexer, não tem problema:
-> os 21 MB só tornam o clone mais lento, nada quebra.
-
-### 7.7 — O que **não** vai para o GitHub (por design)
-
-O `.gitignore` exclui de propósito:
-
-| Item | Por quê |
-|---|---|
-| `.venv/` | ambiente virtual — cada máquina cria o seu |
-| `dist/`, `build/`, `*.spec` | binários gerados; recrie com `gerar_exe.bat` |
-| `libusb-1.0.dll` | é baixada pelo instalador, e é específica da arquitetura |
-| `POS58Setup.exe`, `POS-58` | drivers do fabricante (3 MB, e não funcionam em ARM) |
-
-⚠️ **Importante sobre a `libusb-1.0.dll`:** nunca versione essa DLL. A do x64 não
-roda no ARM64 e vice-versa — se ela entrar no repositório, quebra na outra máquina.
-Deixe o `instalar.bat` baixar a correta para cada uma.
-
----
-
-## 8. 🧪 Diagnóstico (`testar.bat` / `autoteste.py`)
-
-Quando algo não funciona, **rode isto primeiro** — ele diz exatamente onde está o
-problema, sem adivinhação:
-
-```powershell
-testar.bat                  # Windows (duplo clique também funciona)
-```
-```bash
-./.venv/bin/python autoteste.py     # Linux
-```
-
-São 37 verificações em 8 blocos: ambiente, dependências, backend libusb, comandos
-ESC/POS byte a byte, montagem do cupom, enumeração USB, tratamento de erros e
-impressão física.
-
-Funciona **com ou sem a impressora conectada**. Sem ela, valida toda a lógica e
-avisa que a parte física ficou pendente. Para incluir a impressão de verdade:
-
-```powershell
-testar.bat --imprimir
-```
-
-Resultado esperado quando está tudo certo:
-
-```
-  Total de verificacoes : 37
-  Passou                : 35
-  Falhou                : 0
-  Pulou                 : 2
-```
-
-> Se pedir ajuda a alguém, **cole a saída completa do `testar.bat`**. Ela contém a
-> arquitetura do Python, a versão das bibliotecas, o estado do backend e a lista de
-> dispositivos USB — que é tudo o que se precisa para diagnosticar.
-
-### Bugs que esta bateria já encontrou
-
-Não é teste decorativo — ele pegou defeitos reais durante o desenvolvimento:
-
-| Bug | Consequência |
-|---|---|
-| `"timeout" in str(erro)` não casava com a mensagem real do PyUSB, `"Operation timed out"` | O erro mais comum (sem papel, tampa aberta, impressora desligada) caía em "erro não classificado" em vez da mensagem útil. Corrigido testando também `"timed out"`, `errno 110` e `USBTimeoutError`. |
-| `echo A) ...` dentro de bloco `if ( )` no `.bat` | O `)` fechava o bloco antes da hora e quebrava o instalador justamente na mensagem de "Python não encontrado". |
-| Linhas com LF puro nos `.bat` | O `cmd.exe` não interpreta. Resolvido com CRLF + `.gitattributes`. |
-
----
-
-## 9. 💾 A impressora fica memorizada
-
-Na **primeira impressão bem-sucedida**, o programa grava os dados da impressora e
-passa a ir direto nela nas próximas vezes, sem varrer o barramento USB inteiro.
-
-```
-[OK] Impressora memorizada: 0x0416:0x5011 — POS-58 Printer
-```
-
-Onde fica o arquivo:
-
-| Sistema | Caminho |
-|---|---|
-| Windows | `%LOCALAPPDATA%\impressora-termica\impressora.json` |
-| Linux | `~/.config/impressora-termica/impressora.json` |
-
-Fica **fora da pasta do projeto** de propósito: assim o `git pull` nunca sobrescreve
-a sua configuração, e o projeto pode viver numa pasta somente-leitura.
-
-```bash
-python imprime_termica.py --config      # mostra o que está memorizado
-python imprime_termica.py --esquecer    # apaga e volta a autodetectar
-```
-
-Se a impressora memorizada não estiver presente (mudou de porta, trocou de
-equipamento), **não dá erro** — o programa volta sozinho para a autodetecção normal.
+</sub>
+</div>
