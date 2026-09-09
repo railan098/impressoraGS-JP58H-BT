@@ -68,7 +68,7 @@ oferece registrar na inicialização.
 ./empacotar/linux/gerar_deb.sh
 
 # instalar (na máquina do balcão)
-sudo apt install ./dist/menuxy-ponte_3.0.0_all.deb
+sudo apt install ./dist/menuxy-ponte_3.0.1_all.deb
 ```
 
 O pacote é `all` — o mesmo arquivo serve amd64, arm64 e armhf, inclusive

@@ -51,7 +51,7 @@ await fetch('http://127.0.0.1:9100/imprimir', {
 
 ```bash
 ./empacotar/linux/gerar_deb.sh
-sudo apt install ./dist/menuxy-ponte_3.0.0_all.deb
+sudo apt install ./dist/menuxy-ponte_3.0.1_all.deb
 menuxy-ponte --origens https://menuxy.alvesprotect.app.br
 menuxy-ponte --testar
 ```
@@ -84,8 +84,17 @@ editor de texto:
 |---|---|
 | **Situação** | a ponte está no ar? quantos cupons saíram? quem pode mandar imprimir? |
 | **Impressoras** | escolher a impressora, imprimir teste, abrir a gaveta, cadastrar impressora de rede |
-| **Configuração** | porta, origens permitidas, acentos, largura do papel, corte — e **iniciar junto com o computador** |
+| **Configuração** | porta, origens permitidas, acentos, largura do papel, corte, tamanho do registro — o botão de **iniciar junto com o computador**, o diagnóstico de suporte e a volta aos padrões |
 | **Registro** | o que passou por aqui, com hora |
+
+E no rodapé, três alcances diferentes, porque confundi-los é o que faz alguém
+achar que desligou a impressão e ela continuar saindo:
+
+| Botão | Alcance |
+|---|---|
+| **Minimizar** | esconde a janela. A ponte continua imprimindo. |
+| **Encerrar esta cópia** | fecha o programa que está na tela. Outras cópias seguem no ar. |
+| **Desligar tudo** | encerra **todas** as pontes desta máquina. Nada mais imprime até alguém abrir de novo. |
 
 Mais o **atalho na área de trabalho e no menu**, criado por um botão — fora da
 pasta do projeto, que é de onde o operador vai abrir todo dia.
@@ -167,9 +176,10 @@ O resto, inclusive o que ela **não** protege:
 python3 testes/verificar_ponte.py
 ```
 
-98 checagens: montagem ESC/POS, saneamento da configuração, contrato dos cinco
+115 checagens: montagem ESC/POS, saneamento da configuração, contrato dos cinco
 backends, resolução de identificadores, rotas, CORS, validação de entrada,
-nomes hostis, lista de origens, teto por minuto e superfície de ataque.
+nomes hostis, lista de origens, teto por minuto, superfície de ataque, a escolha
+da interface USB numa multifuncional e o ambiente vazado por um snap.
 
 **Não gasta papel** — mira uma impressora que não existe e confere a recusa.
 Para imprimir de verdade, um cupom só:

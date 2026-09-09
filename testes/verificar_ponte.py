@@ -34,7 +34,8 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from ponte_menuxy import VERSAO, catalogo, config, escpos, servidor  # noqa: E402
+from ponte_menuxy import (VERSAO, catalogo, config, escpos,  # noqa: E402
+                          inicializacao, servidor)
 from ponte_menuxy.backends import rede, serial_, sistema, usb_direta, usbprint  # noqa: E402
 
 PORTA = 19187          # porta alta e improvável: não colide com a ponte de verdade
@@ -177,6 +178,233 @@ def bloco_backends():
     ok, detalhe = rede.imprimir(("127.0.0.1", 9), b"x")
     conferir("rede: host inalcançável falha com explicação, sem exceção",
              ok is False and isinstance(detalhe, str) and detalhe)
+    _conferir_interface_usb()
+    _conferir_ambiente_de_snap()
+
+
+# --------------------------------------------------------------------------- #
+#  Ambiente vazado por um snap
+# --------------------------------------------------------------------------- #
+# Regressão de outro caso real: aberta a partir do terminal do VS Code (que é um
+# snap), a ponte herdava XDG_DATA_HOME e GIO_MODULE_DIR do sandbox. O atalho do
+# menu ia parar dentro do snap — onde o GNOME nunca procura — e o `gio set
+# metadata::trusted` falhava com "not supported", porque o gio do sistema
+# carregava os módulos do sandbox. Sem a marcação, o GNOME **não lança** o ícone
+# da área de trabalho: o duplo clique não faz nada e não diz nada.
+
+def _conferir_ambiente_de_snap():
+    guardado = {nome: os.environ.get(nome)
+                for nome in ("XDG_DATA_HOME", "XDG_CONFIG_HOME", "GIO_MODULE_DIR",
+                             "LD_LIBRARY_PATH")}
+    try:
+        casa = os.path.expanduser("~")
+
+        os.environ["XDG_DATA_HOME"] = f"{casa}/snap/code/260/.local/share"
+        conferir("snap: XDG_DATA_HOME do sandbox é ignorado",
+                 inicializacao.pasta_xdg("XDG_DATA_HOME", ".local", "share")
+                 == os.path.join(casa, ".local", "share"),
+                 inicializacao.pasta_xdg("XDG_DATA_HOME", ".local", "share"))
+
+        os.environ["XDG_DATA_HOME"] = f"{casa}/meus-dados"
+        conferir("snap: um XDG_DATA_HOME legítimo é respeitado",
+                 inicializacao.pasta_xdg("XDG_DATA_HOME", ".local", "share")
+                 == f"{casa}/meus-dados")
+
+        os.environ.pop("XDG_CONFIG_HOME", None)
+        conferir("snap: sem a variável, cai no padrão do XDG",
+                 inicializacao.pasta_xdg("XDG_CONFIG_HOME", ".config")
+                 == os.path.join(casa, ".config"))
+
+        os.environ["GIO_MODULE_DIR"] = f"{casa}/snap/code/common/.cache/gio-modules"
+        os.environ["LD_LIBRARY_PATH"] = "/opt/meu-programa/lib"
+        limpo = inicializacao.ambiente_limpo()
+        conferir("snap: GIO_MODULE_DIR do sandbox sai do ambiente",
+                 "GIO_MODULE_DIR" not in limpo)
+        conferir("snap: LD_LIBRARY_PATH legítimo permanece",
+                 limpo.get("LD_LIBRARY_PATH") == "/opt/meu-programa/lib")
+        conferir("snap: ambiente_limpo devolve cópia, não mexe no processo",
+                 os.environ.get("GIO_MODULE_DIR", "").endswith("gio-modules"))
+
+        conferir("snap: reconhece caminho de sandbox",
+                 inicializacao._dentro_de_snap(f"{casa}/snap/code/260/.local/share")
+                 and inicializacao._dentro_de_snap("/snap/code/260/usr/lib"))
+        conferir("snap: não confunde uma pasta que só tem 'snap' no nome",
+                 not inicializacao._dentro_de_snap(f"{casa}/Documentos/snapshots"))
+    finally:
+        for nome, valor in guardado.items():
+            if valor is None:
+                os.environ.pop(nome, None)
+            else:
+                os.environ[nome] = valor
+
+
+# --------------------------------------------------------------------------- #
+#  A interface certa no USB direto
+# --------------------------------------------------------------------------- #
+# Regressão de um caso real: numa Epson L3150 a classe 7 (Printer) mora na
+# interface 1, com 'usbhid' na 0. O backend soltava o driver do kernel da
+# interface 0 por hábito, o 'usblp' continuava segurando a 1, e o claim morria
+# com "[Errno 16] Resource busy" — que a ponte traduzia como "outro programa
+# tem a impressora", mandando o operador procurar um culpado inexistente.
+#
+# O teste monta um barramento de mentira, então roda em qualquer máquina,
+# com ou sem pyusb, com ou sem impressora plugada — e sem gastar papel.
+
+class _EndpointFalso:
+    def __init__(self, endereco, atributos=0x02):
+        self.bEndpointAddress = endereco
+        self.bmAttributes = atributos
+
+
+class _InterfaceFalsa:
+    def __init__(self, numero, classe, endpoints):
+        self.bInterfaceNumber = numero
+        self.bInterfaceClass = classe
+        self._endpoints = endpoints
+
+    def __iter__(self):
+        return iter(self._endpoints)
+
+
+class _ConfiguracaoFalsa:
+    def __init__(self, interfaces):
+        self._interfaces = interfaces
+
+    def __iter__(self):
+        return iter(self._interfaces)
+
+    def __getitem__(self, chave):
+        return self._interfaces[0]
+
+
+class _DispositivoFalso:
+    def __init__(self, interfaces, com_driver_em):
+        self.configuracao = _ConfiguracaoFalsa(interfaces)
+        self.com_driver_em = set(com_driver_em)
+        self.diario = []       # tudo o que o backend fez, em ordem
+
+    def get_active_configuration(self):
+        return self.configuracao
+
+    def is_kernel_driver_active(self, numero):
+        return numero in self.com_driver_em
+
+    def detach_kernel_driver(self, numero):
+        if numero not in self.com_driver_em:
+            raise OSError(2, "No data available")
+        self.com_driver_em.discard(numero)
+        self.diario.append(("soltou", numero))
+
+    def attach_kernel_driver(self, numero):
+        self.com_driver_em.add(numero)
+        self.diario.append(("devolveu", numero))
+
+
+def _usb_de_mentira(dispositivo):
+    """Instala um 'usb' falso em sys.modules e devolve o que remover depois."""
+    import types
+
+    escritos = []
+
+    def claim_interface(dev, numero):
+        if numero in dev.com_driver_em:
+            raise OSError(16, "Resource busy")
+        dev.diario.append(("reivindicou", numero))
+
+    def release_interface(dev, numero):
+        dev.diario.append(("liberou", numero))
+
+    def find_descriptor(interface, custom_match=None):
+        for endpoint in interface:
+            if custom_match is None or custom_match(endpoint):
+                return endpoint
+        return None
+
+    class _EscritorFalso:
+        def __init__(self, endpoint, dispositivo):
+            self.endpoint = endpoint
+            self.dispositivo = dispositivo
+
+    def escrever(endpoint, dados, timeout=None):
+        escritos.append((endpoint.bEndpointAddress, len(dados)))
+        return len(dados)
+
+    _EndpointFalso.write = escrever
+
+    util = types.ModuleType("usb.util")
+    util.ENDPOINT_OUT = 0x00
+    util.ENDPOINT_TYPE_BULK = 0x02
+    util.endpoint_direction = lambda endereco: endereco & 0x80
+    util.endpoint_type = lambda atributos: atributos & 0x03
+    util.find_descriptor = find_descriptor
+    util.claim_interface = claim_interface
+    util.release_interface = release_interface
+    util.dispose_resources = lambda dev: None
+
+    core = types.ModuleType("usb.core")
+    core.find = lambda **kw: dispositivo
+
+    raiz = types.ModuleType("usb")
+    raiz.core = core
+    raiz.util = util
+
+    anteriores = {nome: sys.modules.get(nome) for nome in ("usb", "usb.core", "usb.util")}
+    sys.modules.update({"usb": raiz, "usb.core": core, "usb.util": util})
+    return anteriores, escritos
+
+
+def _rodar_com_usb_falso(interfaces, com_driver_em):
+    dispositivo = _DispositivoFalso(interfaces, com_driver_em)
+    anteriores, escritos = _usb_de_mentira(dispositivo)
+    try:
+        ok, detalhe = usb_direta.imprimir((0x04b8, 0x1143), b"CUPOM")
+    finally:
+        for nome, modulo in anteriores.items():
+            if modulo is None:
+                sys.modules.pop(nome, None)
+            else:
+                sys.modules[nome] = modulo
+    return ok, detalhe, dispositivo.diario, escritos
+
+
+def _conferir_interface_usb():
+    # Multifuncional: 'usbhid' na 0, impressora (classe 7) na 1 com o 'usblp'.
+    # É a Epson L3150, e o formato de toda multifuncional.
+    multifuncional = [
+        _InterfaceFalsa(0, 0xFF, [_EndpointFalso(0x01)]),
+        _InterfaceFalsa(1, 7, [_EndpointFalso(0x04), _EndpointFalso(0x85)]),
+        _InterfaceFalsa(2, 0xFF, [_EndpointFalso(0x07)]),
+    ]
+    ok, detalhe, diario, escritos = _rodar_com_usb_falso(multifuncional, com_driver_em={1})
+
+    conferir("usb: multifuncional (classe 7 na interface 1) imprime",
+             ok is True, detalhe)
+    conferir("usb: solta o driver da interface de impressora, não da 0",
+             ("soltou", 1) in diario and ("soltou", 0) not in diario, str(diario))
+    conferir("usb: reivindica a interface de impressora",
+             ("reivindicou", 1) in diario, str(diario))
+    conferir("usb: escreve no endpoint bulk-out daquela interface (0x04)",
+             escritos == [(0x04, 5)], str(escritos))
+    conferir("usb: devolve o driver do kernel no fim (a fila do sistema sobrevive)",
+             ("devolveu", 1) in diario, str(diario))
+    conferir("usb: libera antes de devolver o driver",
+             ("liberou", 1) in diario
+             and diario.index(("liberou", 1)) < diario.index(("devolveu", 1)), str(diario))
+
+    # Térmica simples: uma interface só, a 0. O caminho de sempre não regride.
+    termica = [_InterfaceFalsa(0, 7, [_EndpointFalso(0x01), _EndpointFalso(0x82)])]
+    ok, detalhe, diario, escritos = _rodar_com_usb_falso(termica, com_driver_em={0})
+    conferir("usb: térmica de uma interface só continua imprimindo",
+             ok is True, detalhe)
+    conferir("usb: nela o driver solto é o da 0 mesmo",
+             ("soltou", 0) in diario and ("reivindicou", 0) in diario, str(diario))
+
+    # Sem 'usblp' segurando nada: não há o que soltar, e nada a devolver.
+    ok, _, diario, _ = _rodar_com_usb_falso(
+        [_InterfaceFalsa(1, 7, [_EndpointFalso(0x04)])], com_driver_em=set())
+    conferir("usb: sem driver do kernel, não solta nem devolve nada",
+             ok is True and not any(a in ("soltou", "devolveu") for a, _ in diario),
+             str(diario))
 
 
 def bloco_resolucao(cfg):

@@ -17,7 +17,7 @@ Nada aqui importa `tkinter`, `usb` ou `serial` no topo do módulo: são todos
 opcionais, e a ponte precisa subir numa máquina que não tenha nenhum deles.
 """
 
-VERSAO = "3.0.0"
+VERSAO = "3.0.1"
 NOME = "Ponte de Impressão Menuxy"
 NOME_CURTO = "menuxy-ponte"
 

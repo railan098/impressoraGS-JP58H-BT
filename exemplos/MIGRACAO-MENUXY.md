@@ -25,7 +25,7 @@ máquina. Tudo abaixo da seção 2 é ganho opcional.
 pkill -f ponte.py
 
 # 2. instale a v3
-sudo apt install ./dist/menuxy-ponte_3.0.0_all.deb
+sudo apt install ./dist/menuxy-ponte_3.0.1_all.deb
 
 # 3. confirme que ela vê a mesma impressora de antes
 menuxy-ponte --listar

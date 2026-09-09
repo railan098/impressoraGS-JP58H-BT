@@ -55,6 +55,64 @@ def empacotado() -> bool:
     return bool(getattr(sys, "frozen", False))
 
 
+# --------------------------------------------------------------------------- #
+#  Ambiente contaminado por snap
+# --------------------------------------------------------------------------- #
+# Um terminal aberto dentro de um snap — o VS Code do snapd é o caso comum —
+# exporta o ambiente do sandbox dele para **todo** processo filho. Dois desses
+# valores estragam a integração com a área de trabalho, e de um jeito
+# silencioso:
+#
+# * ``XDG_DATA_HOME=~/snap/code/260/.local/share`` — o atalho do menu vai parar
+#   dentro do sandbox, onde o GNOME nunca vai procurar. O programa diz "atalho
+#   criado" e não há atalho nenhum.
+# * ``GIO_MODULE_DIR=~/snap/code/common/.cache/gio-modules`` — o ``gio`` do
+#   sistema passa a carregar os módulos do snap, que não têm o de metadados do
+#   gvfs. ``gio set ... metadata::trusted`` então responde "not supported", a
+#   marcação de confiança não acontece, e o GNOME se recusa a lançar o ícone da
+#   área de trabalho. O duplo clique não faz absolutamente nada.
+#
+# Nenhum dos dois é problema do snap: é vazamento de ambiente. A ponte é
+# instalada fora dele e tem de gravar fora dele.
+
+_VARIAVEIS_DE_SNAP = (
+    "GIO_MODULE_DIR", "GIO_EXTRA_MODULES", "GTK_PATH", "GSETTINGS_SCHEMA_DIR",
+    "GDK_PIXBUF_MODULE_FILE", "LD_LIBRARY_PATH", "LOCPATH",
+)
+
+
+def _dentro_de_snap(caminho: str) -> bool:
+    """O caminho aponta para dentro do sandbox de algum snap?"""
+    return "/snap/" in (caminho or "").replace(os.sep, "/")
+
+
+def ambiente_limpo() -> dict:
+    """
+    Uma cópia do ambiente sem o que um snap injetou.
+    
+    Só remove a variável que **aponta para dentro de um snap** — um valor
+    legítimo do usuário fica onde está.
+    """
+    ambiente = dict(os.environ)
+    for nome in _VARIAVEIS_DE_SNAP:
+        if _dentro_de_snap(ambiente.get(nome, "")):
+            ambiente.pop(nome, None)
+    return ambiente
+
+
+def pasta_xdg(variavel: str, *padrao: str) -> str:
+    """
+    A pasta XDG do usuário, ignorando o que um snap tenha redirecionado.
+
+    ``pasta_xdg("XDG_DATA_HOME", ".local", "share")`` devolve
+    ``~/.local/share`` mesmo quando o terminal veio de dentro de um snap.
+    """
+    base = os.environ.get(variavel) or ""
+    if not base or _dentro_de_snap(base):
+        base = os.path.join(os.path.expanduser("~"), *padrao)
+    return base
+
+
 def comando(sem_janela: bool = False) -> List[str]:
     """
     A linha de comando que faz esta mesma ponte subir de novo.
@@ -205,7 +263,8 @@ def _pasta_area_de_trabalho() -> str:
     if shutil.which("xdg-user-dir"):
         try:
             saida = subprocess.run(["xdg-user-dir", "DESKTOP"], capture_output=True,
-                                   text=True, timeout=5).stdout.strip()
+                                   text=True, timeout=5,
+                                   env=ambiente_limpo()).stdout.strip()
             if saida and os.path.isdir(saida):
                 return saida
         except Exception:
@@ -239,8 +298,7 @@ def _conteudo_desktop(sem_janela: bool = False) -> str:
 
 
 def _linux_arquivo_autostart() -> str:
-    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
-    pasta = os.path.join(base, "autostart")
+    pasta = os.path.join(pasta_xdg("XDG_CONFIG_HOME", ".config"), "autostart")
     os.makedirs(pasta, exist_ok=True)
     return os.path.join(pasta, f"{NOME_CURTO}.desktop")
 
@@ -280,15 +338,42 @@ def _linux_atalho(destino_pasta: str) -> Tuple[bool, str]:
     except OSError as erro:
         return False, f"não foi possível gravar {atalho}: {erro}"
 
-    # O GNOME desde a 42 ignora atalhos que o usuário não marcou como
-    # confiáveis, e apenas mostra "Arquivo não confiável". Esta é a marcação.
-    if shutil.which("gio"):
-        try:
-            subprocess.run(["gio", "set", atalho, "metadata::trusted", "true"],
-                           capture_output=True, timeout=5)
-        except Exception:
-            pass
+    ok, motivo = marcar_confiavel(atalho)
+    if not ok:
+        # Não é detalhe: sem a marcação o GNOME simplesmente não lança o ícone,
+        # e o duplo clique não faz nada nem mostra erro. Dizer "atalho criado" e
+        # calar isto é entregar um ícone morto.
+        return True, (f"{atalho}\n     ATENÇÃO: não consegui marcar o atalho como "
+                      f"confiável ({motivo}).\n     O GNOME não lança um atalho não "
+                      "confiável — o duplo clique não fará nada.\n     Clique com o "
+                      "botão direito no ícone e escolha 'Permitir execução'.")
     return True, atalho
+
+
+def marcar_confiavel(atalho: str) -> Tuple[bool, str]:
+    """
+    Marca o ``.desktop`` como confiável para o GNOME poder lançá-lo.
+
+    Desde a 42 o GNOME se recusa a executar um lançador que o usuário não
+    marcou, e a recusa é muda: o ícone fica lá e o duplo clique não faz nada.
+
+    Roda com o ambiente limpo de propósito. Com o ``GIO_MODULE_DIR`` de um snap
+    no caminho, o ``gio`` do sistema carrega os módulos do sandbox, não acha o
+    de metadados do gvfs e responde "Setting attribute metadata::trusted not
+    supported" — que foi exatamente o que aconteceu quando o atalho foi criado
+    a partir do terminal do VS Code.
+    """
+    if not shutil.which("gio"):
+        return False, "o comando 'gio' não existe nesta máquina"
+    try:
+        resultado = subprocess.run(
+            ["gio", "set", atalho, "metadata::trusted", "true"],
+            capture_output=True, text=True, timeout=10, env=ambiente_limpo())
+    except Exception as erro:
+        return False, f"{type(erro).__name__}: {erro}"
+    if resultado.returncode == 0:
+        return True, ""
+    return False, (resultado.stderr or resultado.stdout or "gio falhou").strip()
 
 
 # --------------------------------------------------------------------------- #
@@ -398,9 +483,7 @@ def criar_atalhos(area_de_trabalho: bool = True, menu: bool = True) -> List[str]
         mensagens.append(("atalho criado: " if ok else "falhou: ") + detalhe)
 
     if menu:
-        pasta = os.path.join(
-            os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share"),
-            "applications")
+        pasta = os.path.join(pasta_xdg("XDG_DATA_HOME", ".local", "share"), "applications")
         os.makedirs(pasta, exist_ok=True)
         ok, detalhe = _linux_atalho(pasta)
         mensagens.append(("atalho no menu: " if ok else "falhou: ") + detalhe)
@@ -408,7 +491,7 @@ def criar_atalhos(area_de_trabalho: bool = True, menu: bool = True) -> List[str]
         if shutil.which("update-desktop-database"):
             try:
                 subprocess.run(["update-desktop-database", pasta],
-                               capture_output=True, timeout=15)
+                               capture_output=True, timeout=15, env=ambiente_limpo())
             except Exception:
                 pass
 
@@ -451,3 +534,150 @@ def onde() -> str:
     if sys.platform == "darwin":
         return _mac_arquivo()
     return _linux_arquivo_autostart()
+
+
+# --------------------------------------------------------------------------- #
+#  Desligar tudo
+# --------------------------------------------------------------------------- #
+# "Encerrar a ponte" fecha ESTA cópia. Não é a mesma coisa que desligar a
+# impressão na máquina, e a diferença aparece justamente quando incomoda: o
+# operador fechou a janela, o cupom continuou saindo, e ninguém entende por
+# quê. As causas são banais — o autostart já subiu uma cópia sem janela no
+# login, alguém abriu uma segunda em outra porta, um terminal ficou com uma
+# rodando de ontem.
+#
+# Daí este par: descobrir as outras cópias e encerrá-las.
+#
+# **Nada de shell**, como no resto do projeto. No Linux a varredura é o
+# ``/proc``, que é exato e não gasta processo nenhum; no macOS é um ``ps`` com
+# lista de argumentos; no Windows é o ``taskkill`` filtrando pelo PID para não
+# derrubar a si mesmo.
+
+_PROGRAMAS = ("menuxy-ponte", "pontemenuxy", "pontemenuxy.exe")
+
+
+def _parece_a_ponte(argumentos: List[str]) -> bool:
+    """
+    Esta linha de comando é uma ponte, ou só alguém com o nome na tela?
+
+    A pergunta importa: uma busca solta por "ponte_menuxy" acerta o editor com
+    o arquivo aberto, o ``tail`` no registro e o próprio ``grep``. Encerrar o
+    editor de alguém para desligar uma impressora seria um estrago bem maior do
+    que o problema. Por isso só duas formas contam, e são as duas que existem:
+    o executável empacotado, e ``python -m ponte_menuxy``.
+    """
+    if not argumentos:
+        return False
+    programa = os.path.basename(argumentos[0]).lower()
+    if programa in _PROGRAMAS:
+        return True
+    if "python" not in programa:
+        return False
+    for indice, argumento in enumerate(argumentos):
+        if argumento == "-m" and argumentos[indice + 1:indice + 2] == ["ponte_menuxy"]:
+            return True
+    # O console_script instalado pelo pip:  /usr/bin/python3 /usr/bin/menuxy-ponte
+    return any(os.path.basename(a).lower() in _PROGRAMAS for a in argumentos[1:])
+
+
+def _outras_no_proc() -> List[int]:
+    meu = os.getpid()
+    achados: List[int] = []
+    for entrada in os.listdir("/proc"):
+        if not entrada.isdigit() or int(entrada) == meu:
+            continue
+        try:
+            with open(f"/proc/{entrada}/cmdline", "rb") as arquivo:
+                partes = arquivo.read().split(b"\0")
+        except OSError:
+            continue           # morreu no meio da varredura, ou não é nossa
+        argumentos = [p.decode("utf-8", "replace") for p in partes if p]
+        if _parece_a_ponte(argumentos):
+            achados.append(int(entrada))
+    return achados
+
+
+def _outras_no_ps() -> List[int]:
+    meu = os.getpid()
+    achados: List[int] = []
+    try:
+        saida = subprocess.run(["ps", "-Ao", "pid=,args="], capture_output=True,
+                               text=True, timeout=10).stdout
+    except Exception:
+        return achados
+    for linha in saida.splitlines():
+        pedaco = linha.strip().split(None, 1)
+        if len(pedaco) != 2 or not pedaco[0].isdigit():
+            continue
+        pid = int(pedaco[0])
+        if pid != meu and _parece_a_ponte(pedaco[1].split()):
+            achados.append(pid)
+    return achados
+
+
+def outras_copias() -> List[int]:
+    """PIDs das outras pontes em execução nesta máquina. Nunca inclui a nossa."""
+    if os.name == "nt":
+        return []              # no Windows quem enumera e encerra é o taskkill
+    if os.path.isdir("/proc"):
+        return _outras_no_proc()
+    return _outras_no_ps()
+
+
+def _encerrar_windows() -> Tuple[int, str]:
+    encerradas = 0
+    problemas: List[str] = []
+    for imagem in ("PonteMenuxy.exe", "pythonw.exe", "python.exe"):
+        # O filtro de PID poupa a nossa própria cópia; sem ele o taskkill
+        # derrubaria esta janela antes de ela encerrar o servidor direito.
+        try:
+            resultado = subprocess.run(
+                ["taskkill", "/F", "/IM", imagem, "/FI", f"PID ne {os.getpid()}"],
+                capture_output=True, text=True, timeout=20)
+        except Exception as erro:
+            problemas.append(f"{imagem}: {erro}")
+            continue
+        encerradas += resultado.stdout.upper().count("SUCCESS")
+    detalhe = "; ".join(problemas)
+    return encerradas, detalhe
+
+
+def encerrar_outras() -> Tuple[int, str]:
+    """
+    Encerra as outras cópias da ponte nesta máquina. Não encerra a nossa.
+
+    Devolve ``(quantas, detalhe)``. Pede primeiro com ``SIGTERM``, que deixa a
+    outra cópia devolver a porta e fechar o registro; só quem ignorar leva
+    ``SIGKILL``, meio segundo depois.
+    """
+    if os.name == "nt":
+        return _encerrar_windows()
+
+    import signal
+    import time
+
+    alvos = outras_copias()
+    if not alvos:
+        return 0, ""
+
+    problemas: List[str] = []
+    for pid in alvos:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        except PermissionError:
+            problemas.append(f"{pid}: de outro usuário")
+
+    time.sleep(0.5)
+    for pid in alvos:
+        try:
+            os.kill(pid, 0)          # ainda vivo?
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass                      # já foi: é o caso normal
+
+    vivos = [p for p in outras_copias() if p in alvos]
+    if vivos:
+        problemas.append("continuam de pé: " + ", ".join(str(p) for p in vivos))
+    return len(alvos) - len(vivos), "; ".join(problemas)

@@ -23,7 +23,7 @@ POST /janela        traz a janela desta ponte para a frente
 ```json
 {
   "ok": true,
-  "versao": "3.0.0",
+  "versao": "3.0.1",
   "sistema": "linux",
   "backends": ["sistema", "usb", "rede"],
   "impressoras": ["sistema:Termica58", "usb:0416:5011"],

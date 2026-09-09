@@ -11,8 +11,13 @@ devem ser refeitas por suposição:
    declaram ``bDeviceClass = 0`` ("classe definida na interface") e só revelam
    a classe 7 (Printer) na interface. Olhar apenas o descritor do dispositivo
    perde metade dos modelos — inclusive a GS-JP58H.
-2. **Solte o driver do kernel antes do claim.** No Linux o ``usblp`` costuma
-   ter reivindicado o aparelho; sem soltar, o claim falha com "Resource busy".
+2. **Solte o driver do kernel antes do claim — da interface certa.** No Linux
+   o ``usblp`` costuma ter reivindicado o aparelho; sem soltar, o claim falha
+   com "Resource busy". E o número da interface não é sempre 0: numa
+   multifuncional a de impressão fica no meio das outras (na Epson L3150 é a
+   1, com ``usbhid`` na 0). Descubra o ``bInterfaceNumber`` pelo descritor e
+   solte esse — soltar a 0 por hábito não tira o ``usblp`` de lugar nenhum.
+   Depois **devolva o driver**, ou a fila do sistema para de imprimir.
 3. **Nunca fixe o endereço do endpoint em ``0x01``.** Ele varia por fabricante.
    Descubra pelo descritor procurando o endpoint bulk de saída.
 
@@ -86,7 +91,7 @@ def listar(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "id": f"usb:{dispositivo.idVendor:04x}:{dispositivo.idProduct:04x}",
                 "rotulo": f"{rotulo} (USB direta)",
                 "tipo": TIPO,
-                "papel": "58mm",
+                "papel": "",
                 "detalhe": "libusb no endpoint bulk-out",
             })
     except Exception as erro:
@@ -111,17 +116,11 @@ def imprimir(alvo: Tuple[int, int], dados: bytes) -> Tuple[bool, str]:
     if dispositivo is None:
         return False, f"dispositivo {vid:04x}:{pid:04x} não encontrado — cabo solto ou impressora desligada?"
 
-    interface_reivindicada = None
+    numero = None            # bInterfaceNumber da interface de impressora
+    reivindicada = False     # nós demos claim?
+    driver_solto = False     # nós tiramos o usblp? então temos de devolvê-lo
     try:
-        # 1) Soltar o driver do kernel (Linux/macOS). No Windows a chamada não
-        #    existe e a exceção é o comportamento esperado.
-        try:
-            if dispositivo.is_kernel_driver_active(0):
-                dispositivo.detach_kernel_driver(0)
-        except Exception:
-            pass
-
-        # 2) Só configure se ainda não estiver configurado. Chamar
+        # 1) Só configure se ainda não estiver configurado. Chamar
         #    set_configuration() num aparelho já configurado reinicia o
         #    pipeline e, em algumas térmicas, come o primeiro cupom.
         try:
@@ -130,7 +129,7 @@ def imprimir(alvo: Tuple[int, int], dados: bytes) -> Tuple[bool, str]:
             dispositivo.set_configuration()
             configuracao = dispositivo.get_active_configuration()
 
-        # 3) A interface de impressora, não a primeira que aparecer.
+        # 2) A interface de impressora, não a primeira que aparecer.
         interface = None
         for candidata in configuracao:
             if candidata.bInterfaceClass == CLASSE_IMPRESSORA:
@@ -138,6 +137,27 @@ def imprimir(alvo: Tuple[int, int], dados: bytes) -> Tuple[bool, str]:
                 break
         if interface is None:
             interface = configuracao[(0, 0)]
+        numero = interface.bInterfaceNumber
+
+        # 3) Soltar o driver do kernel DESSA interface (Linux/macOS).
+        #
+        #    O número importa, e descobri-lo tem de vir antes: numa térmica
+        #    simples a impressora é a interface 0 e soltar a 0 resolve, mas
+        #    uma multifuncional traz três interfaces e põe a de impressão no
+        #    meio — a L3150, por exemplo, tem a classe 7 na interface 1, com
+        #    'usbhid' na 0. Soltar a 0 ali não tira o 'usblp' de lugar nenhum,
+        #    e o claim seguinte morre com "Resource busy" apontando para um
+        #    programa concorrente que não existe.
+        #
+        #    No Windows a chamada não existe e a exceção é o esperado.
+        try:
+            if dispositivo.is_kernel_driver_active(numero):
+                dispositivo.detach_kernel_driver(numero)
+                driver_solto = True
+        except NotImplementedError:
+            pass
+        except Exception:
+            pass
 
         # 4) O endereço do endpoint varia por fabricante — descubra, não fixe.
         saida = usb.util.find_descriptor(
@@ -150,7 +170,11 @@ def imprimir(alvo: Tuple[int, int], dados: bytes) -> Tuple[bool, str]:
         if saida is None:
             return False, "a impressora não expõe endpoint bulk de saída"
 
-        interface_reivindicada = interface
+        # 5) Claim explícito. O write faria um implícito, mas então o erro
+        #    apareceria como falha de escrita e não como disputa pelo aparelho.
+        usb.util.claim_interface(dispositivo, numero)
+        reivindicada = True
+
         saida.write(dados, timeout=TEMPO_LIMITE_MS)
         return True, f"{len(dados)} bytes"
 
@@ -158,8 +182,17 @@ def imprimir(alvo: Tuple[int, int], dados: bytes) -> Tuple[bool, str]:
         return False, _explicar(erro)
     finally:
         try:
-            if interface_reivindicada is not None:
-                usb.util.release_interface(dispositivo, interface_reivindicada)
+            if reivindicada:
+                usb.util.release_interface(dispositivo, numero)
+        except Exception:
+            pass
+        # Devolver o usblp é obrigatório, não gentileza: sem isto a fila do
+        # sistema ('sistema:<nome>') para de funcionar depois do primeiro
+        # cupom por USB direta, e só volta quando alguém desliga o cabo. O
+        # caminho de reserva não pode ser vítima do caminho principal.
+        try:
+            if driver_solto:
+                dispositivo.attach_kernel_driver(numero)
         except Exception:
             pass
         try:

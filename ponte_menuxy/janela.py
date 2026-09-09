@@ -318,9 +318,9 @@ def abrir(servidor, cfg: Dict[str, Any]) -> int:
     var_colunas = tk.StringVar(value=str(cfg["colunas"]))
     var_avancos = tk.StringVar(value=str(cfg["avancos_antes_do_corte"]))
     var_limite = tk.StringVar(value=str(cfg["limite_por_minuto"]))
+    var_registro_kb = tk.StringVar(value=str(cfg["registro_kb"]))
     var_cortar = tk.BooleanVar(value=cfg["cortar_por_padrao"])
     var_gaveta = tk.BooleanVar(value=cfg["abrir_gaveta_apos_imprimir"])
-    var_inicio = tk.BooleanVar(value=inicializacao.ativa())
     var_janela = tk.BooleanVar(value=cfg["abrir_janela"])
     var_minimiza = tk.BooleanVar(value=cfg["fechar_minimiza"])
     var_registro = tk.BooleanVar(value=cfg["registrar_em_arquivo"])
@@ -357,18 +357,60 @@ def abrir(servidor, cfg: Dict[str, Any]) -> int:
     campo(5, "Limite por minuto", var_limite,
           "Teto de trabalhos por minuto. Existe para um site hostil, ou um laço com "
           "defeito, não despejar a bobina inteira.")
+    campo(6, "Tamanho do registro (KB)", var_registro_kb,
+          "Quanto o arquivo de registro pode crescer antes de ser rotacionado. Um "
+          "balcão movimentado enche 512 KB em algumas semanas; aumentar só vale se "
+          "você precisa de histórico longo para conferência.")
 
     marcadores = ttk.Frame(campos)
-    marcadores.grid(row=12, column=0, columnspan=2, sticky="w", pady=(12, 0))
+    marcadores.grid(row=14, column=0, columnspan=2, sticky="w", pady=(12, 0))
     ttk.Checkbutton(marcadores, text="Cortar o papel ao fim de cada cupom",
                     variable=var_cortar).pack(anchor="w")
     ttk.Checkbutton(marcadores, text="Abrir a gaveta de dinheiro após imprimir",
                     variable=var_gaveta).pack(anchor="w")
     ttk.Separator(marcadores, orient="horizontal").pack(fill="x", pady=8)
-    ttk.Checkbutton(marcadores, text="Iniciar automaticamente ao ligar o computador",
-                    variable=var_inicio).pack(anchor="w")
+
+    # Início com o computador: botão, não marcador.
+    #
+    # Como marcador ele só valia depois de "Salvar configuração", e quem marcava
+    # e fechava a janela descobria no dia seguinte que a ponte não tinha subido.
+    # Ligar o início automático é uma ação, não uma preferência a confirmar
+    # depois — então acontece no clique. E o rótulo ao lado diz o estado **real**
+    # do sistema, lido na hora: é a resposta para "eu marquei isso ou não?".
+    inicio = ttk.Frame(marcadores)
+    inicio.pack(anchor="w", fill="x", pady=(2, 2))
+
+    botao_inicio = ttk.Button(inicio, text="", width=34)
+    botao_inicio.pack(side="left")
+    rotulo_inicio = ttk.Label(inicio, text="")
+    rotulo_inicio.pack(side="left", padx=(10, 0))
+
+    def pintar_inicio():
+        ligado = inicializacao.ativa()
+        botao_inicio.configure(
+            text="Desativar início com o computador" if ligado
+            else "Iniciar junto com o computador")
+        rotulo_inicio.configure(
+            text=("● ligado — a ponte sobe sozinha no login" if ligado
+                  else "● desligado — alguém precisa abrir a ponte todo dia"),
+            foreground=COR_OK if ligado else COR_ALERTA)
+
+    def alternar_inicio():
+        desejado = not inicializacao.ativa()
+        ok, detalhe = inicializacao.definir(desejado)
+        pintar_inicio()
+        if ok:
+            cfg["iniciar_com_sistema"] = desejado
+            config.salvar(cfg)
+        anotar(detalhe if ok else f"FALHA: {detalhe}")
+        if not ok:
+            messagebox.showerror(NOME, detalhe)
+
+    botao_inicio.configure(command=alternar_inicio)
+    pintar_inicio()
+
     ttk.Label(marcadores, text=f"registro em: {inicializacao.onde()}",
-              foreground=COR_SUAVE).pack(anchor="w", padx=(22, 0))
+              foreground=COR_SUAVE).pack(anchor="w", padx=(4, 0))
     ttk.Checkbutton(marcadores, text="Abrir esta janela ao iniciar",
                     variable=var_janela).pack(anchor="w")
     ttk.Checkbutton(marcadores, text="Fechar a janela apenas minimiza (a ponte continua imprimindo)",
@@ -383,8 +425,11 @@ def abrir(servidor, cfg: Dict[str, Any]) -> int:
             cfg["colunas"] = int(var_colunas.get())
             cfg["avancos_antes_do_corte"] = int(var_avancos.get())
             cfg["limite_por_minuto"] = int(var_limite.get())
+            cfg["registro_kb"] = int(var_registro_kb.get())
         except ValueError:
-            messagebox.showerror(NOME, "Porta, colunas, avanços e limite precisam ser números.")
+            messagebox.showerror(
+                NOME, "Porta, colunas, avanços, limite e tamanho do registro "
+                      "precisam ser números.")
             return
 
         origens = [o.strip() for o in var_origens.get().split(",") if o.strip()]
@@ -395,7 +440,6 @@ def abrir(servidor, cfg: Dict[str, Any]) -> int:
         cfg["abrir_janela"] = var_janela.get()
         cfg["fechar_minimiza"] = var_minimiza.get()
         cfg["registrar_em_arquivo"] = var_registro.get()
-        cfg["iniciar_com_sistema"] = var_inicio.get()
 
         # Reler pelo saneamento: é ele que impede uma porta 70000 digitada por
         # engano de virar uma ponte que não sobe no próximo login.
@@ -403,11 +447,15 @@ def abrir(servidor, cfg: Dict[str, Any]) -> int:
         config.salvar(cfg)
         registro.ativar(bool(cfg["registrar_em_arquivo"]), int(cfg["registro_kb"]))
 
-        if var_inicio.get() != inicializacao.ativa():
-            ok, detalhe = inicializacao.definir(var_inicio.get())
-            anotar(detalhe if ok else f"FALHA: {detalhe}")
-            if not ok:
-                messagebox.showerror(NOME, detalhe)
+        # O saneamento pode ter corrigido o que foi digitado (uma porta 70000,
+        # um registro de 4 KB). Reescrever os campos com o que ficou de fato
+        # evita a tela mentir sobre o que está gravado.
+        var_porta.set(str(cfg["porta"]))
+        var_colunas.set(str(cfg["colunas"]))
+        var_avancos.set(str(cfg["avancos_antes_do_corte"]))
+        var_limite.set(str(cfg["limite_por_minuto"]))
+        var_registro_kb.set(str(cfg["registro_kb"]))
+        var_origens.set(", ".join(cfg["origens_permitidas"]))
 
         pintar_origem()
         anotar("configuração gravada em " + config.caminho_config())
@@ -447,6 +495,102 @@ def abrir(servidor, cfg: Dict[str, Any]) -> int:
 
     ttk.Button(rodape_config, text="Abrir pasta da configuração",
                command=abrir_pasta).pack(side="left")
+
+    def ver_diagnostico():
+        """
+        O relatório de suporte numa janela, com botão de copiar.
+
+        É o mesmo de ``menuxy-ponte --diagnostico``. Existe aqui porque quem
+        precisa dele é justamente quem não abre terminal: na hora em que o
+        cupom não sai, o suporte pede "me manda o diagnóstico" e o operador
+        precisa conseguir produzir isso sozinho.
+        """
+        from .cli import _diagnostico          # tardio: cli importa esta janela
+
+        try:
+            relatorio = _diagnostico(cfg)
+        except Exception as erro:
+            messagebox.showerror(NOME, f"não foi possível montar o relatório: {erro}")
+            return
+
+        vista = tk.Toplevel(raiz)
+        vista.title(f"{NOME} — diagnóstico")
+        vista.geometry("760x520")
+        vista.transient(raiz)
+
+        area = tk.Text(vista, wrap="none", font=("Consolas", 9))
+        rolagem = ttk.Scrollbar(vista, orient="vertical", command=area.yview)
+        area.configure(yscrollcommand=rolagem.set)
+        area.insert("1.0", relatorio)
+        area.configure(state="disabled")
+        rolagem.pack(side="right", fill="y")
+        area.pack(side="top", fill="both", expand=True, padx=(10, 0), pady=10)
+
+        pe = ttk.Frame(vista)
+        pe.pack(fill="x", padx=10, pady=(0, 10))
+
+        def copiar():
+            raiz.clipboard_clear()
+            raiz.clipboard_append(relatorio)
+            anotar("diagnóstico copiado para a área de transferência")
+
+        ttk.Button(pe, text="Copiar tudo", command=copiar).pack(side="left")
+        ttk.Button(pe, text="Fechar", command=vista.destroy).pack(side="right")
+
+    ttk.Button(rodape_config, text="Ver diagnóstico",
+               command=ver_diagnostico).pack(side="left", padx=6)
+
+    def restaurar_padroes():
+        """
+        Volta a configuração ao estado de fábrica, menos as impressoras.
+
+        A impressora escolhida e as de rede cadastradas ficam: elas descrevem o
+        **balcão**, não a preferência de ninguém, e redescobrir o IP da
+        impressora da cozinha é justamente o trabalho que ninguém quer refazer.
+        """
+        if not messagebox.askyesno(
+                NOME,
+                "Voltar porta, origens permitidas, acentos, largura do papel, corte "
+                "e limites aos valores de fábrica?\n\n"
+                "ATENÇÃO: de fábrica a lista de origens é '*', ou seja, ABERTA — "
+                "qualquer site que o operador visitar poderá gastar a bobina. "
+                "Feche-a de novo com o endereço do seu sistema.\n\n"
+                "A impressora escolhida e as impressoras de rede cadastradas são "
+                "mantidas.\n\n"
+                "O início automático não é alterado — ele tem botão próprio."):
+            return
+
+        guardadas = {
+            "impressora_padrao": cfg.get("impressora_padrao", ""),
+            "impressoras_rede": list(cfg.get("impressoras_rede") or []),
+            "iniciar_com_sistema": inicializacao.ativa(),
+        }
+        cfg.update(config.carregar_de(dict(guardadas)))
+        config.salvar(cfg)
+        registro.ativar(bool(cfg["registrar_em_arquivo"]), int(cfg["registro_kb"]))
+
+        var_porta.set(str(cfg["porta"]))
+        var_origens.set(", ".join(cfg["origens_permitidas"]))
+        var_codepage.set(cfg["codepage"])
+        var_colunas.set(str(cfg["colunas"]))
+        var_avancos.set(str(cfg["avancos_antes_do_corte"]))
+        var_limite.set(str(cfg["limite_por_minuto"]))
+        var_registro_kb.set(str(cfg["registro_kb"]))
+        var_cortar.set(cfg["cortar_por_padrao"])
+        var_gaveta.set(cfg["abrir_gaveta_apos_imprimir"])
+        var_janela.set(cfg["abrir_janela"])
+        var_minimiza.set(cfg["fechar_minimiza"])
+        var_registro.set(cfg["registrar_em_arquivo"])
+
+        pintar_origem()
+        anotar("configuração restaurada aos padrões de fábrica")
+        if cfg["porta"] != servidor.server_address[1]:
+            messagebox.showinfo(
+                NOME, f"A porta voltou para {cfg['porta']}. Feche e abra a ponte "
+                      "para a mudança valer.")
+
+    ttk.Button(rodape_config, text="Restaurar padrões",
+               command=restaurar_padroes).pack(side="left")
 
     # =========================================================== REGISTRO ===
     ttk.Label(aba_registro, text="O que passou por aqui", font=("", 11, "bold")).pack(anchor="w")
@@ -523,7 +667,15 @@ def abrir(servidor, cfg: Dict[str, Any]) -> int:
         if cfg.get("fechar_minimiza", True):
             # Minimiza, não esconde: sem ícone de bandeja, esconder a janela a
             # tornaria impossível de reabrir sem matar o processo.
+            #
+            # E deixa dito que minimizou. Sem esta linha o X da janela parece
+            # ter encerrado o programa, e ele continua de pé: o terminal que o
+            # abriu nunca devolve o prompt, a porta 9100 segue ocupada e a
+            # próxima tentativa de abrir esbarra numa ponte que "não existe".
             raiz.iconify()
+            anotar("janela minimizada — a ponte CONTINUA no ar e imprimindo. "
+                   "Para encerrar de verdade use 'Encerrar esta cópia', ou "
+                   "'Desligar tudo' se houver mais de uma.")
             return
         encerrar()
 
@@ -535,12 +687,52 @@ def abrir(servidor, cfg: Dict[str, Any]) -> int:
             pass
         raiz.destroy()
 
+    def desligar_tudo():
+        """
+        Encerra a impressão nesta máquina inteira, não só esta janela.
+
+        "Encerrar esta cópia" fecha o que está na frente do operador, e isso
+        engana: o autostart costuma ter subido uma cópia sem janela no login,
+        e às vezes há uma terceira num terminal esquecido. O cupom continua
+        saindo depois de fechar a janela, e ninguém entende por quê. Este botão
+        é a resposta para "para de imprimir, agora".
+        """
+        outras = inicializacao.outras_copias()
+        if os.name == "nt":
+            resumo = "esta ponte e qualquer outra cópia aberta nesta máquina"
+        elif outras:
+            resumo = (f"esta ponte e mais {len(outras)} cópia(s) em execução "
+                      f"(PID {', '.join(str(p) for p in outras)})")
+        else:
+            resumo = "esta ponte — é a única em execução nesta máquina"
+
+        aviso = (f"Encerrar {resumo}.\n\n"
+                 "Nada mais será impresso até alguém abrir a ponte de novo.")
+        if inicializacao.ativa():
+            aviso += ("\n\nO início automático continua ligado: ela volta sozinha "
+                      "quando o computador for ligado. Para impedir isso, desligue-o "
+                      "antes, na aba Configuração.")
+        if not messagebox.askyesno(NOME, aviso + "\n\nDesligar tudo agora?"):
+            return
+
+        encerradas, detalhe = inicializacao.encerrar_outras()
+        if encerradas:
+            anotar(f"desligar tudo: {encerradas} outra(s) cópia(s) encerrada(s)")
+        if detalhe:
+            anotar(f"desligar tudo: {detalhe}")
+            messagebox.showwarning(
+                NOME, "Nem todas as cópias foram encerradas:\n\n" + detalhe)
+        encerrar()
+
     rodape = ttk.Frame(raiz)
     rodape.pack(fill="x", padx=10, pady=(0, 10))
     ttk.Label(rodape, text=f"configuração: {config.caminho_config()}",
               foreground=COR_SUAVE).pack(side="left")
-    ttk.Button(rodape, text="Encerrar a ponte", command=encerrar).pack(side="right")
+    # Os rótulos precisam dizer o alcance de cada um: lado a lado, "Encerrar a
+    # ponte" e "Desligar tudo" pareceriam o mesmo botão escrito duas vezes.
+    ttk.Button(rodape, text="Encerrar esta cópia", command=encerrar).pack(side="right")
     ttk.Button(rodape, text="Minimizar", command=raiz.iconify).pack(side="right", padx=6)
+    ttk.Button(rodape, text="Desligar tudo", command=desligar_tudo).pack(side="right")
 
     raiz.protocol("WM_DELETE_WINDOW", ao_fechar)
 

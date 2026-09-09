@@ -5,8 +5,8 @@ Como sair do código e chegar num arquivo que o cliente instala.
 | Destino | Comando | Sai |
 |---|---|---|
 | Windows, sem Python | `empacotar\windows\gerar_exe.bat` | `dist\PonteMenuxy.exe` |
-| Debian/Ubuntu | `./empacotar/linux/gerar_deb.sh` | `dist/menuxy-ponte_3.0.0_all.deb` |
-| Linux, sem Python | `./empacotar/linux/gerar_binario.sh` | `dist/menuxy-ponte-3.0.0-linux-x86_64` |
+| Debian/Ubuntu | `./empacotar/linux/gerar_deb.sh` | `dist/menuxy-ponte_3.0.1_all.deb` |
+| Linux, sem Python | `./empacotar/linux/gerar_binario.sh` | `dist/menuxy-ponte-3.0.1-linux-x86_64` |
 
 ---
 
@@ -59,7 +59,7 @@ a base de clientes cresce.
 
 ```bash
 ./empacotar/linux/gerar_deb.sh
-sudo apt install ./dist/menuxy-ponte_3.0.0_all.deb
+sudo apt install ./dist/menuxy-ponte_3.0.1_all.deb
 ```
 
 **`Architecture: all`** — tudo é Python puro, então o mesmo arquivo serve
@@ -123,7 +123,7 @@ Na dúvida, prefira o `.deb` — Python puro não tem esse problema.
 3. Rode o verificador: `python3 testes/verificar_ponte.py`.
 4. Gere os pacotes dos três destinos.
 5. Confira cada um numa máquina limpa, com `--diagnostico`.
-6. Marque a versão no git: `git tag -a v3.0.0 -m "..."`.
+6. Marque a versão no git: `git tag -a v3.0.1 -m "..."`.
 
 ## Reprodutibilidade
 

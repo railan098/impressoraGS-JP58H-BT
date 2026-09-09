@@ -98,10 +98,78 @@ pacote `.deb` já instala a regra.
 ### Linux: `usblp` segurando o aparelho
 
 Erro típico: `Resource busy`. O kernel anexou o `usblp` à impressora. A ponte
-tenta soltar sozinha; quando não consegue:
+solta o driver da interface de impressão antes de escrever, e o devolve depois
+— então este erro deixou de ser rotina a partir da 3.0.1.
+
+Se ainda aparecer, é disputa de verdade: alguém está imprimindo pelo CUPS
+naquele instante, ou outro programa tem o aparelho. Espere a fila esvaziar. Em
+último caso:
 
 ```bash
 sudo modprobe -r usblp
+```
+
+Repare que isso derruba junto o caminho `sistema:` para impressoras USB — o
+CUPS fala com elas justamente pelo `usblp`. Prefira descobrir quem está
+segurando:
+
+```bash
+sudo fuser -v /dev/usb/lp*
+```
+
+> **Até a 3.0.0** a ponte soltava sempre a interface 0. Numa multifuncional a
+> interface de impressão não é a 0 — na Epson L3150 é a 1 — então ela soltava
+> a interface errada, o `usblp` continuava no lugar e o erro aparecia mesmo sem
+> nenhum concorrente. Se você vê `Resource busy` numa multifuncional,
+> **atualize**: `modprobe -r usblp` só mascarava o defeito.
+
+### O ícone está lá, o duplo clique não faz nada
+
+O GNOME, desde a 42, **se recusa a lançar um `.desktop` que não esteja marcado
+como confiável** — e a recusa é muda. Confira:
+
+```bash
+gio info -a metadata::trusted ~/Desktop/menuxy-ponte.desktop
+```
+
+Não aparecendo `trusted: true`, a saída manual é clicar no ícone com o botão
+direito e escolher **"Permitir execução"**. Pelo terminal:
+
+```bash
+gio set ~/Desktop/menuxy-ponte.desktop metadata::trusted true
+```
+
+Se esse comando responder **`Setting attribute metadata::trusted not
+supported`**, o problema é ambiente vazado por um snap — leia o próximo item.
+
+### Criou o atalho de dentro do VS Code (ou de outro snap)
+
+Um terminal aberto dentro de um snap exporta o ambiente do sandbox para tudo
+que nasce ali. Dois valores estragam o atalho, em silêncio:
+
+| Variável | Estrago |
+|---|---|
+| `XDG_DATA_HOME=~/snap/code/.../.local/share` | o atalho do menu vai para dentro do sandbox, onde o GNOME nunca procura |
+| `GIO_MODULE_DIR=~/snap/code/common/.cache/gio-modules` | o `gio` do sistema carrega os módulos do snap, não acha o de metadados do gvfs, e a marcação de confiança falha com "not supported" |
+
+Para ver se é o seu caso:
+
+```bash
+env | grep -E "XDG_DATA_HOME|GIO_MODULE_DIR"
+```
+
+**A partir da 3.0.1 a ponte ignora as duas** e grava nos lugares certos. Em
+versões anteriores, recrie o atalho a partir de um terminal normal — não o do
+editor:
+
+```bash
+env -u XDG_DATA_HOME -u GIO_MODULE_DIR python3 -m ponte_menuxy --criar-atalho
+```
+
+E apague o órfão que ficou no sandbox:
+
+```bash
+rm -f ~/snap/*/*/.local/share/applications/menuxy-ponte.desktop
 ```
 
 ### Windows: `usbprint.sys` bloqueando o libusb

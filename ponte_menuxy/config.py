@@ -90,8 +90,11 @@ def pasta_dados() -> str:
         pasta = os.path.join(os.path.expanduser("~"), "Library",
                              "Application Support", "MenuxyPonte")
     else:
-        base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
-        pasta = os.path.join(base, NOME_CURTO)
+        # pasta_xdg, e não os.environ direto: um terminal aberto dentro de um
+        # snap exporta o XDG_CONFIG_HOME do sandbox dele, e a configuração da
+        # ponte iria parar lá — invisível para a ponte aberta pelo ícone.
+        from .inicializacao import pasta_xdg      # tardio: evita ciclo
+        pasta = os.path.join(pasta_xdg("XDG_CONFIG_HOME", ".config"), NOME_CURTO)
     os.makedirs(pasta, exist_ok=True)
     return pasta
 

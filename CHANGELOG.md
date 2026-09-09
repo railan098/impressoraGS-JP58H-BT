@@ -1,5 +1,86 @@
 # Histórico de versões
 
+## 3.0.1 — 2026-09-09
+
+### Corrigido
+
+* **`usb:` falhava com "Resource busy" em multifuncional.** O backend soltava
+  o driver do kernel sempre da **interface 0**. Numa impressora simples ela é a
+  de impressão e funcionava; numa multifuncional não é — na Epson L3150 a
+  classe 7 (Printer) fica na interface **1**, com `usbhid` na 0. Resultado: a
+  ponte soltava a interface errada, o `usblp` continuava segurando a certa, e o
+  `claim` morria com `[Errno 16] Resource busy`. A mensagem então acusava "outro
+  programa tem a impressora" — mandando o operador procurar um culpado que não
+  existia.
+
+  Agora a interface de impressão é descoberta pelo descritor **antes** de
+  qualquer coisa, e é dela que o driver sai.
+
+* **O driver do kernel é devolvido no fim.** Sem isso, um cupom pela USB direta
+  deixava o `usblp` desanexado e a fila do sistema (`sistema:<nome>`) parava de
+  imprimir até alguém desligar o cabo — o caminho de reserva virava vítima do
+  caminho principal.
+
+* **`claim` explícito antes de escrever**, para uma disputa pelo aparelho
+  aparecer como disputa e não como falha de escrita.
+
+* **A largura do papel deixou de ser chutada.** Todo aparelho de classe 7
+  aparecia no catálogo como `58mm`, inclusive uma jato de tinta A4.
+
+* **O ícone do atalho não abria nada.** Três defeitos somados, todos
+  disparados por abrir a ponte de dentro do terminal do VS Code — que é um snap
+  e exporta o ambiente do sandbox para os filhos:
+
+  1. `gio set ... metadata::trusted` falhava com *"not supported"*, porque o
+     `GIO_MODULE_DIR` do snap fazia o `gio` do sistema carregar os módulos do
+     sandbox, sem o de metadados do gvfs. **O GNOME não lança um `.desktop` não
+     confiável**, e não diz por quê: o duplo clique não fazia nada.
+  2. A falha era engolida (`except Exception: pass`), então a ponte anunciava
+     "atalho criado" e entregava um ícone morto. Agora ela avisa, e ensina o
+     clique com o botão direito → "Permitir execução".
+  3. O atalho do menu ia para `XDG_DATA_HOME`, que o snap apontava para
+     `~/snap/code/260/.local/share` — dentro do sandbox. Não havia nem sequer a
+     entrada no menu como reserva.
+
+  A ponte agora ignora `XDG_DATA_HOME`, `XDG_CONFIG_HOME`, `GIO_MODULE_DIR` e
+  companhia **quando apontam para dentro de um snap**, e roda `gio` e
+  `update-desktop-database` com o ambiente limpo. Um valor legítimo do usuário
+  continua valendo.
+
+### Novo
+
+* **Botão "Desligar tudo"** no rodapé da janela: encerra **todas** as pontes
+  desta máquina, não só a que está na tela. Existe porque o autostart costuma
+  ter subido uma cópia sem janela no login, e fechar a janela da frente não
+  parava a impressão — ninguém entendia por quê. O diálogo diz quantas cópias
+  encontrou, e avisa quando o início automático vai trazê-las de volta no
+  próximo boot.
+
+* **Início com o computador virou botão**, com o estado real do sistema ao
+  lado. Como caixa de seleção ele só valia depois de "Salvar configuração", e
+  quem marcava e fechava a janela descobria no dia seguinte que a ponte não
+  tinha subido.
+
+* **Botão "Ver diagnóstico"** — o relatório de `--diagnostico` numa janela, com
+  "Copiar tudo". Quem precisa dele é justamente quem não abre terminal.
+
+* **Botão "Restaurar padrões"**, que preserva a impressora escolhida e as de
+  rede cadastradas — elas descrevem o balcão, não uma preferência — e avisa que
+  a lista de origens de fábrica é aberta.
+
+* **Tamanho do registro (KB)** agora é editável na janela; antes só existia no
+  arquivo de configuração.
+
+* **Minimizar deixa dito que minimizou.** O X da janela parecia encerrar o
+  programa, e ele continuava de pé segurando a porta 9100.
+
+### Verificação
+
+* 115 checagens (eram 98). As dezessete novas cobrem a escolha da interface USB num
+  barramento de mentira — multifuncional, térmica de uma interface só e aparelho
+  sem driver do kernel — e o ambiente vazado por um snap. Rodam em qualquer
+  máquina, sem impressora plugada e sem gastar papel.
+
 ## 3.0.0 — 2026-09-09
 
 A ponte vira **aplicativo**: instalável, com janela de configuração e ícone na
